@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNA Florida List Dashboard</title>
+    <!-- Load Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Load Tailwind CSS with dark mode -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <style>
+        /* Custom styles */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Style for the table header */
+        thead th {
+            position: sticky;
+            top: 0;
+            background-color: #f3f4f6; /* bg-gray-100 */
+            z-index: 10;
+        }
+        .dark thead th {
+            background-color: #374151; /* bg-gray-700 */
+        }
+        /* Ensure table layout is fixed for better column handling */
+        table {
+            table-layout: fixed;
+        }
+        /* Handle long strings and links */
+        td {
+            word-break: break-word;
+        }
+        /* Mobile-specific adjustments */
+        @media (max-width: 640px) {
+            .mobile-stack {
+                display: block;
+            }
+            .mobile-scroll {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+        }
+        /* Sort icons */
+        .sort-asc::after {
+            content: ' ↑';
+            font-size: 0.8em;
+            vertical-align: middle;
+        }
+        .sort-desc::after {
+            content: ' ↓';
+            font-size: 0.8em;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-800 dark:text-gray-200 transition-colors duration-200">
+
+    <div class="container mx-auto p-2 sm:p-4 md:p-8 max-w-7xl">
+        <div class="flex justify-between items-center mb-4 sm:mb-6">
+            <h1 class="text-2xl sm:text-3xl font-bold text-blue-800 dark:text-blue-300 flex-1 text-center sm:text-left">DNA Florida List Dashboard</h1>
+            <!-- Dark mode toggle -->
+            <button id="theme-toggle" class="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Toggle dark mode">
+                <!-- Icon will be set by JS -->
+                🌙
+            </button>
+        </div>
+
+        <!-- Tab Controls -->
+        <div class="flex flex-col sm:flex-row border-b border-gray-300 dark:border-gray-700 mb-4" role="tablist">
+            <button id="tab-dna" class="tab-btn w-full sm:w-auto px-4 py-3 text-base sm:text-lg font-medium text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 focus:outline-none" data-tab="dna-content" role="tab" aria-selected="true" aria-controls="dna-content">
+                DNA List
+            </button>
+            <button id="tab-bcac" class="tab-btn w-full sm:w-auto px-4 py-3 text-base sm:text-lg font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 focus:outline-none" data-tab="bcac-content" role="tab" aria-selected="false" aria-controls="bcac-content">
+                BCAC DNA List
+            </button>
+        </div>
+
+        <!-- Tab Content Area -->
+        <div id="tab-content">
+
+            <!-- DNA List Tab Content -->
+            <div id="dna-content" class="tab-pane" role="tabpanel" aria-labelledby="tab-dna">
+                <div class="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl sm:text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">DNA List</h2>
+                    <!-- Search label and input for DNA List -->
+                    <label for="search-dna" class="sr-only">Search DNA List</label>
+                    <input type="text" id="search-dna" class="w-full max-w-lg mb-4 p-2 sm:p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="Search all columns...">
+                    <!-- Advanced Filters -->
+                    <div id="advanced-filters-dna" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                        <select id="filter-county-dna" aria-label="Filter by county" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base">
+                            <option value="">All Counties</option>
+                        </select>
+                        <input type="date" id="date-from-dna" aria-label="Filter from date" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="From Date">
+                        <input type="date" id="date-to-dna" aria-label="Filter to date" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="To Date">
+                    </div>
+                    <!-- Reset button for DNA -->
+                    <button id="reset-dna" class="mb-4 px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-700 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base">
+                        Reset Filters
+                    </button>
+                    <!-- Export button for DNA List -->
+                    <button id="export-dna" class="mb-4 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base">
+                        Export Filtered CSV
+                    </button>
+                    <!-- Loader -->
+                    <div id="loader-dna" class="flex justify-center p-4">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400"></div>
+                        <span class="ml-3 text-gray-600 dark:text-gray-300">Loading data...</span>
+                    </div>
+                    <!-- Table container for scrolling -->
+                    <div class="mobile-scroll overflow-x-auto max-h-[60vh] sm:max-h-[70vh] border border-gray-200 dark:border-gray-700 rounded-lg hidden">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead class="bg-gray-100 dark:bg-gray-700">
+                                <tr id="headers-dna">
+                                    <!-- Headers will be dynamically inserted here -->
+                                </tr>
+                            </thead>
+                            <tbody id="table-body-dna" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <!-- Data rows will be dynamically inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Pagination -->
+                    <div id="pagination-dna" class="flex justify-between items-center mt-4 px-4 hidden">
+                        <button id="prev-dna" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Prev</button>
+                        <span id="page-info-dna" class="text-sm text-gray-700 dark:text-gray-300"></span>
+                        <button id="next-dna" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Next</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BCAC List Tab Content -->
+            <div id="bcac-content" class="tab-pane hidden" role="tabpanel" aria-labelledby="tab-bcac">
+                <div class="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl sm:text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">BCAC DNA List</h2>
+                    <!-- Search label and input for BCAC List -->
+                    <label for="search-bcac" class="sr-only">Search BCAC List</label>
+                    <input type="text" id="search-bcac" class="w-full max-w-lg mb-4 p-2 sm:p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="Search all columns...">
+                    <!-- Advanced Filters (Note: BCAC list might not have County/Date, but structure is here) -->
+                    <div id="advanced-filters-bcac" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                        <select id="filter-county-bcac" aria-label="Filter by county" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base">
+                            <option value="">All Counties</option>
+                        </select>
+                        <input type="date" id="date-from-bcac" aria-label="Filter from date" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="From Date">
+                        <input type="date" id="date-to-bcac" aria-label="Filter to date" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 text-sm sm:text-base" placeholder="To Date">
+                    </div>
+                    <!-- Reset button for BCAC -->
+                    <button id="reset-bcac" class="mb-4 px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-700 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base">
+                        Reset Filters
+                    </button>
+                    <!-- Export button for BCAC List -->
+                    <button id="export-bcac" class="mb-4 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base">
+                        Export Filtered CSV
+                    </button>
+                    <!-- Loader -->
+                    <div id="loader-bcac" class="flex justify-center p-4">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400"></div>
+                        <span class="ml-3 text-gray-600 dark:text-gray-300">Loading data...</span>
+                    </div>
+                    <!-- Table container for scrolling -->
+                    <div class="mobile-scroll overflow-x-auto max-h-[60vh] sm:max-h-[70vh] border border-gray-200 dark:border-gray-700 rounded-lg hidden">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead class="bg-gray-100 dark:bg-gray-700">
+                                <tr id="headers-bcac">
+                                    <!-- Headers will be dynamically inserted here -->
+                                </tr>
+                            </thead>
+                            <tbody id="table-body-bcac" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <!-- Data rows will be dynamically inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Pagination -->
+                    <div id="pagination-bcac" class="flex justify-between items-center mt-4 px-4 hidden">
+                        <button id="prev-bcac" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Prev</button>
+                        <span id="page-info-bcac" class="text-sm text-gray-700 dark:text-gray-300"></span>
+                        <button id="next-bcac" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Next</button>
+                    </div>
+                </div>
+            </div>
+
+        </div> <!-- /#tab-content -->
+    </div> <!-- /.container -->
+
+    <script>
+        // Modular structure: Tables configuration
+        const tables = {
+            dna: {
+                key: 'dna',
+                url: 'https://docs.google.com/spreadsheets/d/1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY/gviz/tq?tqx=out:csv&sheet=DNA%20List', // Updated to live Google Sheets export
+                headerId: 'headers-dna',
+                bodyId: 'table-body-dna',
+                searchId: 'search-dna',
+                exportId: 'export-dna',
+                loaderId: 'loader-dna',
+                paginationId: 'pagination-dna',
+                pageInfoId: 'page-info-dna',
+                prevBtnId: 'prev-dna',
+                nextBtnId: 'next-dna',
+                tableContainerClass: '.mobile-scroll', // Reference to the table's container
+                widths: { Name: 20, County: 15, Date: 10, Details: 40, Link: 15 },
+                data: [],
+                headers: [],
+                filteredData: [],
+                sortCol: null,
+                sortDir: 'asc',
+                currentPage: 1,
+                rowsPerPage: 50,
+                filename: 'dna-florida-list-filtered.csv'
+            },
+            bcac: {
+                key: 'bcac',
+                url: 'https://docs.google.com/spreadsheets/d/1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY/gviz/tq?tqx=out:csv&sheet=BCAC%20DNA%20LIST', // Updated to live Google Sheets export
+                headerId: 'headers-bcac',
+                bodyId: 'table-body-bcac',
+                searchId: 'search-bcac',
+                exportId: 'export-bcac',
+                loaderId: 'loader-bcac',
+                paginationId: 'pagination-bcac',
+                pageInfoId: 'page-info-bcac',
+                prevBtnId: 'prev-bcac',
+                nextBtnId: 'next-bcac',
+                tableContainerClass: '.mobile-scroll', // Reference to the table's container
+                widths: null, // No specific widths, will auto-distribute
+                data: [],
+                headers: [],
+                filteredData: [],
+                sortCol: null,
+                sortDir: 'asc',
+                currentPage: 1,
+                rowsPerPage: 50,
+                filename: 'bcac-dna-list-filtered.csv'
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Theme Management Module
+            const themeModule = {
+                init() {
+                    const themeToggle = document.getElementById('theme-toggle');
+                    const html = document.documentElement;
+                    
+                    // Set initial theme
+                    const isDark = localStorage.getItem('darkMode') === 'true';
+                    if (isDark) {
+                        html.classList.add('dark');
+                        themeToggle.textContent = '☀️';
+                        themeToggle.setAttribute('aria-label', 'Switch to light mode');
+                    } else {
+                        html.classList.remove('dark');
+                        themeToggle.textContent = '🌙';
+                        themeToggle.setAttribute('aria-label', 'Switch to dark mode');
+                    }
+
+                    // Add click listener
+                    themeToggle.addEventListener('click', () => {
+                        html.classList.toggle('dark');
+                        const dark = html.classList.contains('dark');
+                        localStorage.setItem('darkMode', dark);
+                        themeToggle.textContent = dark ? '☀️' : '🌙';
+                        themeToggle.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+                    });
+                }
+            };
+
+            // Tab Management Module
+            const tabModule = {
+                init() {
+                    const tabs = document.querySelectorAll('.tab-btn');
+                    const panes = document.querySelectorAll('.tab-pane');
+
+                    tabs.forEach(tab => {
+                        tab.addEventListener('click', () => {
+                            // Deactivate all tabs
+                            tabs.forEach(t => {
+                                t.classList.remove('text-blue-600', 'border-blue-600', 'dark:text-blue-400', 'dark:border-blue-400');
+                                t.classList.add('text-gray-500', 'dark:text-gray-400', 'hover:text-gray-700', 'dark:hover:text-gray-300');
+                                t.setAttribute('aria-selected', 'false');
+                            });
+                            
+                            // Activate clicked tab
+                            tab.classList.add('text-blue-600', 'border-blue-600', 'dark:text-blue-400', 'dark:border-blue-400');
+                            tab.classList.remove('text-gray-500', 'dark:text-gray-400', 'hover:text-gray-700', 'dark:hover:text-gray-300');
+                            tab.setAttribute('aria-selected', 'true');
+
+                            // Hide all panes
+                            panes.forEach(pane => {
+                                pane.classList.add('hidden');
+                            });
+
+                            // Show target pane
+                            const targetPane = document.getElementById(tab.dataset.tab);
+                            if (targetPane) {
+                                targetPane.classList.remove('hidden');
+                            }
+                        });
+                    });
+                }
+            };
+
+            // Utility Functions Module
+            const utils = {
+                getElement(id) {
+                    return document.getElementById(id);
+                },
+
+                // Main CSV parser (updated for multiline fields)
+                parseCSV(text) {
+                    const headers = [];
+                    const data = [];
+                    let currentRow = [];
+                    let currentVal = '';
+                    let inQuote = false;
+                    text = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n'); // Normalize line endings
+
+                    for (let i = 0; i < text.length; i++) {
+                        const char = text[i];
+                        if (char === '"') {
+                            if (inQuote && i + 1 < text.length && text[i + 1] === '"') {
+                                currentVal += '"';
+                                i++; // Skip next "
+                            } else {
+                                inQuote = !inQuote;
+                            }
+                        } else if (char === ',' && !inQuote) {
+                            currentRow.push(currentVal.trim());
+                            currentVal = '';
+                        } else if (char === '\n' && !inQuote) {
+                            currentRow.push(currentVal.trim());
+                            if (headers.length === 0) {
+                                // First row: headers
+                                headers.push(...currentRow.map(h => h.replace(/^"|"$/g, '').replace(/:$/, '')));
+                            } else {
+                                // Data row
+                                if (currentRow.length === headers.length) {
+                                    const rowObject = {};
+                                    headers.forEach((header, index) => {
+                                        rowObject[header] = currentRow[index].replace(/^"|"$/g, '');
+                                    });
+                                    data.push(rowObject);
+                                } else if (currentRow.length > 0) {
+                                    console.warn('Skipping mismatched row:', currentRow);
+                                }
+                            }
+                            currentRow = [];
+                            currentVal = '';
+                        } else {
+                            currentVal += char;
+                        }
+                    }
+                    // Add last row if pending
+                    if (currentVal || currentRow.length) {
+                        currentRow.push(currentVal.trim());
+                        if (headers.length > 0 && currentRow.length === headers.length) {
+                            const rowObject = {};
+                            headers.forEach((header, index) => {
+                                rowObject[header] = currentRow[index].replace(/^"|"$/g, '');
+                            });
+                            data.push(rowObject);
+                        }
+                    }
+                    return { headers, data };
+                },
+
+                // Export to CSV (updated with user alert)
+                exportCSV(headers, data, filename) {
+                    if (data.length === 0) {
+                        alert("No data to export—try adjusting filters!");
+                        return;
+                    }
+
+                    let csvContent = headers.join(',') + '\n';
+                    data.forEach(row => {
+                        csvContent += headers.map(header => {
+                            let value = row[header] || '';
+                            if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                                // Enclose in quotes and escape internal quotes
+                                value = '"' + value.replace(/"/g, '""') + '"';
+                            }
+                            return value;
+                        }).join(',') + '\n';
+                    });
+
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', filename);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                },
+
+                // Debounce function
+                debounce(func, delay) {
+                    let timeoutId;
+                    return (...args) => {
+                        clearTimeout(timeoutId);
+                        timeoutId = setTimeout(() => func(...args), delay);
+                    };
+                },
+
+                // Sort data
+                sortData(data, col, dir) {
+                    if (!col) return data;
+                    return [...data].sort((a, b) => {
+                        const aVal = (a[col] || '').toLowerCase();
+                        const bVal = (b[col] || '').toLowerCase();
+                        // Handle date sorting
+                        if (col.toLowerCase() === 'date') {
+                            const dateA = new Date(aVal).getTime() || 0;
+                            const dateB = new Date(bVal).getTime() || 0;
+                            return dir === 'asc' ? dateA - dateB : dateB - dateA;
+                        }
+                        // Standard string sort
+                        if (aVal < bVal) return dir === 'asc' ? -1 : 1;
+                        if (aVal > bVal) return dir === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                },
+
+                // Filter data (updated for invalid dates)
+                filterData(data, term = '', county = '', dateFrom = '', dateTo = '') {
+                    const searchTerm = term.toLowerCase();
+                    const fromDate = dateFrom ? new Date(dateFrom).getTime() : 0;
+                    const toDate = dateTo ? new Date(dateTo).getTime() : Infinity;
+
+                    return data.filter(row => {
+                        // Global search
+                        if (searchTerm && !Object.values(row).some(val => (val || '').toString().toLowerCase().includes(searchTerm))) {
+                            return false;
+                        }
+                        // County filter
+                        if (county && row.County !== county) {
+                            return false;
+                        }
+                        // Date filter
+                        if (dateFrom || dateTo) {
+                            const rowDateStr = row.Date || '';
+                            const rowDate = new Date(rowDateStr).getTime();
+                            if (isNaN(rowDate)) {
+                                console.warn(`Invalid date in row: "${rowDateStr}" - skipping date filter for this row.`);
+                                return true; // Include invalid dates
+                            }
+                            if (rowDate < fromDate || rowDate > toDate) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    });
+                },
+
+                // Update pagination controls (updated for empty)
+                updatePagination(config, currentPage, totalPages, rowsPerPage, totalRows) {
+                    if (totalPages === 0 || currentPage === 0) {
+                        this.getElement(config.pageInfoId).textContent = `Page 0 of 0 (0 results)`;
+                    } else {
+                        this.getElement(config.pageInfoId).textContent = `Page ${currentPage} of ${totalPages} (${(currentPage - 1) * rowsPerPage + 1}-${Math.min(currentPage * rowsPerPage, totalRows)} of ${totalRows})`;
+                    }
+                    this.getElement(config.prevBtnId).disabled = currentPage === 1 || currentPage === 0;
+                    this.getElement(config.nextBtnId).disabled = currentPage === totalPages || totalPages === 0;
+                }
+            };
+
+            // Table Management Module
+            const tableModule = {
+                // Load data for a specific table
+                async loadTable(tableKey) {
+                    const config = tables[tableKey];
+                    const loader = utils.getElement(config.loaderId);
+                    const body = utils.getElement(config.bodyId);
+                    const tableContainer = body.closest(config.tableContainerClass);
+                    
+                    loader.classList.remove('hidden');
+                    tableContainer.classList.add('hidden'); // Hide table container while loading
+
+                    try {
+                        const response = await fetch(config.url);
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        const csvText = await response.text();
+                        const parsed = utils.parseCSV(csvText);
+                        const { headers, data } = parsed;
+                        
+                        config.data = data;
+                        config.headers = headers;
+                        
+                        // Populate county filter if applicable
+                        const countySelect = utils.getElement(`filter-county-${tableKey}`);
+                        const dateFromInput = utils.getElement(`date-from-${tableKey}`);
+                        const dateToInput = utils.getElement(`date-to-${tableKey}`);
+
+                        if (headers.includes('County')) {
+                            const uniqueCounties = [...new Set(data.map(row => row.County || '').filter(c => c))].sort();
+                            countySelect.innerHTML = '<option value="">All Counties</option>' + uniqueCounties.map(c => `<option value="${c}">${c}</option>`).join('');
+                            countySelect.disabled = false;
+                        } else {
+                            countySelect.disabled = true;
+                        }
+                        
+                        // Disable date filters if no 'Date' column
+                        if (!headers.includes('Date')) {
+                            dateFromInput.disabled = true;
+                            dateToInput.disabled = true;
+                        } else {
+                            dateFromInput.disabled = false;
+                            dateToInput.disabled = false;
+                        }
+                        
+                        // Initial filter
+                        const debouncedFilter = this.getDebouncedFilter(tableKey);
+                        debouncedFilter();
+                        
+                        this.renderTable(tableKey);
+                        
+                    } catch (error) {
+                        console.error('Error loading CSV:', error);
+                        loader.innerHTML = `<span class="text-red-500 dark:text-red-400">Error loading data from Google Sheets. Check sharing settings or retry. <button onclick="location.reload()" class="underline hover:text-red-600 dark:hover:text-red-300">Retry</button></span>`;
+                    } finally {
+                        loader.classList.add('hidden');
+                        tableContainer.classList.remove('hidden'); // Show table container
+                    }
+                },
+
+                // Get debounced filter function for a table
+                getDebouncedFilter(tableKey) {
+                    const config = tables[tableKey];
+                    return utils.debounce(() => {
+                        const term = utils.getElement(config.searchId).value.toLowerCase();
+                        const countySelect = utils.getElement(`filter-county-${tableKey}`);
+                        const county = countySelect ? countySelect.value : '';
+                        const dateFromInput = utils.getElement(`date-from-${tableKey}`);
+                        const dateFrom = dateFromInput ? dateFromInput.value : '';
+                        const dateToInput = utils.getElement(`date-to-${tableKey}`);
+                        const dateTo = dateToInput ? dateToInput.value : '';
+                        
+                        config.filteredData = utils.filterData(config.data, term, county, dateFrom, dateTo);
+                        config.filteredData = utils.sortData(config.filteredData, config.sortCol, config.sortDir);
+                        if (config.filteredData.length === 0) {
+                            config.currentPage = 0;
+                        } else if (config.currentPage === 0) {
+                            config.currentPage = 1;
+                        }
+                        this.renderTable(tableKey);
+                    }, 300);
+                },
+
+                // Setup filters for a specific table (updated with reset)
+                setupFilters(tableKey) {
+                    const config = tables[tableKey];
+                    const debouncedFilter = this.getDebouncedFilter(tableKey);
+                    
+                    // Attach to search input
+                    utils.getElement(config.searchId).addEventListener('input', debouncedFilter);
+                    
+                    // Attach to advanced filters
+                    ['filter-county', 'date-from', 'date-to'].forEach(idPrefix => {
+                        const el = utils.getElement(`${idPrefix}-${tableKey}`);
+                        if (el) {
+                            el.addEventListener('change', debouncedFilter);
+                        }
+                    });
+
+                    // Attach to reset button
+                    const resetBtn = utils.getElement(`reset-${tableKey}`);
+                    if (resetBtn) {
+                        resetBtn.addEventListener('click', () => {
+                            utils.getElement(config.searchId).value = '';
+                            const countySelect = utils.getElement(`filter-county-${tableKey}`);
+                            if (countySelect) countySelect.value = '';
+                            const dateFrom = utils.getElement(`date-from-${tableKey}`);
+                            if (dateFrom) dateFrom.value = '';
+                            const dateTo = utils.getElement(`date-to-${tableKey}`);
+                            if (dateTo) dateTo.value = '';
+                            debouncedFilter();
+                        });
+                    }
+                },
+
+                // Render table for a specific key
+                renderTable(tableKey) {
+                    const config = tables[tableKey];
+                    const headerContainer = utils.getElement(config.headerId);
+                    const bodyContainer = utils.getElement(config.bodyId);
+
+                    // Clear existing content
+                    headerContainer.innerHTML = '';
+                    bodyContainer.innerHTML = '';
+
+                    // Render headers with sorting
+                    config.headers.forEach((header) => {
+                        const th = document.createElement('th');
+                        th.className = 'px-2 sm:px-4 py-2 sm:py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600';
+                        th.textContent = header;
+                        if (config.sortCol === header) {
+                            th.classList.add(config.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                        }
+                        th.addEventListener('click', () => {
+                            if (config.sortCol === header) {
+                                config.sortDir = config.sortDir === 'asc' ? 'desc' : 'asc';
+                            } else {
+                                config.sortCol = header;
+                                config.sortDir = 'asc';
+                            }
+                            config.filteredData = utils.sortData(config.filteredData, config.sortCol, config.sortDir);
+                            config.currentPage = 1;
+                            this.renderTable(tableKey);
+                        });
+                        headerContainer.appendChild(th);
+                    });
+
+                    // Set column widths
+                    const thElements = headerContainer.querySelectorAll('th');
+                    thElements.forEach((th, index) => {
+                        const headerName = config.headers[index];
+                        const width = config.widths && config.widths[headerName] ? config.widths[headerName] : (100 / config.headers.length);
+                        th.style.width = `${width}%`;
+                    });
+
+                    // Pagination
+                    const totalRows = config.filteredData.length;
+                    const totalPages = Math.ceil(totalRows / config.rowsPerPage);
+                    const start = (config.currentPage - 1) * config.rowsPerPage;
+                    const end = start + config.rowsPerPage;
+                    const paginatedData = config.filteredData.slice(start, end);
+
+                    utils.getElement(config.paginationId).classList.remove('hidden');
+                    utils.updatePagination(config, config.currentPage, totalPages, config.rowsPerPage, totalRows);
+
+                    // Pagination listeners
+                    const prevBtn = utils.getElement(config.prevBtnId);
+                    const nextBtn = utils.getElement(config.nextBtnId);
+                    // Remove old listeners to prevent duplicates
+                    prevBtn.replaceWith(prevBtn.cloneNode(true));
+                    nextBtn.replaceWith(nextBtn.cloneNode(true));
+                    
+                    // Add new listeners
+                    utils.getElement(config.prevBtnId).addEventListener('click', () => {
+                        if (config.currentPage > 1) {
+                            config.currentPage--;
+                            this.renderTable(tableKey);
+                        }
+                    });
+                    utils.getElement(config.nextBtnId).addEventListener('click', () => {
+                        if (config.currentPage < totalPages) {
+                            config.currentPage++;
+                            this.renderTable(tableKey);
+                        }
+                    });
+
+
+                    // Render rows
+                    if (paginatedData.length === 0) {
+                        bodyContainer.innerHTML = `<tr><td colspan="${config.headers.length}" class="p-4 text-center text-gray-500 dark:text-gray-400">No matching data found.</td></tr>`;
+                        return;
+                    }
+
+                    const fragment = document.createDocumentFragment();
+                    paginatedData.forEach(row => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
+                        
+                        config.headers.forEach(header => {
+                            const td = document.createElement('td');
+                            td.className = 'px-2 sm:px-4 py-2 sm:py-3 whitespace-normal text-xs sm:text-sm text-gray-700 dark:text-gray-300';
+                            
+                            const cellData = row[header] || '';
+                            let displayText = cellData;
+
+                            if (cellData.startsWith('http')) {
+                                const a = document.createElement('a');
+                                a.href = cellData;
+                                a.target = '_blank';
+                                a.rel = 'noopener noreferrer';
+                                // Show 'View File' only for the 'Link' column
+                                displayText = (header.toLowerCase() === 'link') ? 'View File' : cellData;
+                                a.textContent = displayText;
+                                a.className = 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 hover:underline break-all';
+                                td.appendChild(a);
+                            } else {
+                                td.textContent = cellData;
+                            }
+                            tr.appendChild(td);
+                        });
+                        fragment.appendChild(tr);
+                    });
+                    bodyContainer.appendChild(fragment);
+                },
+
+                // Setup export for all tables
+                setupExports() {
+                    Object.values(tables).forEach(config => {
+                        const exportBtn = utils.getElement(config.exportId);
+                        exportBtn.addEventListener('click', () => {
+                            utils.exportCSV(config.headers, config.filteredData, config.filename);
+                        });
+                    });
+                },
+
+                // Initialize all tables
+                init() {
+                    this.utils = utils; // Bind utils to this module
+                    Object.keys(tables).forEach(key => {
+                        this.loadTable(key);
+                        this.setupFilters(key);
+                    });
+                    this.setupExports();
+                }
+            };
+
+            // Initialization
+            themeModule.init();
+            tabModule.init();
+            tableModule.init();
+        });
+    </script>
+</body>
+</html>
