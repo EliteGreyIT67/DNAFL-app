@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'  # Cache for faster runs
+          # Removed cache: 'npm' to avoid lock file requirement (no package.json in repo)
 
       - name: Install dependencies
         run: |
