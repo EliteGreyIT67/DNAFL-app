@@ -26,10 +26,9 @@ Screenshot: DNA List tab in light mode (add your own image to assets/ for visual
 
 ## Installation/Setup
 1. **Clone the Repository**:
-   
    ```bash
    git clone https://github.com/EliteGreylT67/DNAFL-app.git
-   cd DNAFLapp
+   cd DNAFL-app
    ```
 
 2. **Customize Data Source (Optional)**:
