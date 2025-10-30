@@ -1,0 +1,69 @@
+name: CI/CD for DNA Dashboard
+
+# Triggers: On pushes/PRs to main, or manual dispatch
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger for testing
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'  # Cache for faster runs
+
+      - name: Install dependencies
+        run: |
+          npm install --save-dev eslint htmlhint
+
+      - name: Lint JavaScript (embedded in HTML)
+        run: |
+          # Extract JS for linting (or lint inline via plugin if added)
+          npx eslint --ext .html --plugin html index.html
+
+      - name: Validate HTML
+        run: |
+          npx htmlhint index.html  # Checks structure, accessibility basics
+
+      - name: Basic Syntax Check
+        run: |
+          # Simple test: Ensure no syntax errors in JS
+          node -c - <<EOF
+          $(grep -Poz '(?s)<script>.*?</script>' index.html | sed 's/<script>//;s/<\/script>//')
+          EOF
+          echo "Syntax valid!"
+
+  deploy:
+    if: github.ref == 'refs/heads/main'  # Only deploy on main pushes
+    runs-on: ubuntu-latest
+    needs: lint-and-test  # Deploy only if lint/test passes
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'  # Upload root (index.html + any assets)
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
