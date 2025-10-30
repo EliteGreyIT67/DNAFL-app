@@ -19,15 +19,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # Removed cache: 'npm' to avoid lock file requirement (no package.json in repo)
+          # No cache needed for lightweight dev installs
 
       - name: Install dependencies
         run: |
-          npm install --save-dev eslint htmlhint
+          npm install --save-dev eslint htmlhint eslint-plugin-html
 
       - name: Lint JavaScript (embedded in HTML)
         run: |
-          # Extract JS for linting (or lint inline via plugin if added)
+          # Lint inline via plugin
           npx eslint --ext .html --plugin html index.html
 
       - name: Validate HTML
