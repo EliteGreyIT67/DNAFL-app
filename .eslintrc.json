@@ -1,0 +1,18 @@
+{
+  "plugins": ["html"],
+  "extends": ["eslint:recommended"],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "rules": {
+    "no-console": "off",  // Allow console for debugging
+    "no-unused-vars": "warn",  // Warn on unused vars for flexibility
+    "prefer-const": "error"  // Enforce const for immutables
+  },
+  "ignorePatterns": ["node_modules/", "dist/"]  // Ignore common dirs
+}
