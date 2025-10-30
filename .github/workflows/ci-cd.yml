@@ -19,16 +19,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # No cache needed for lightweight dev installs
 
       - name: Install dependencies
         run: |
-          npm install --save-dev eslint htmlhint eslint-plugin-html
+          npm install --save-dev eslint@8 htmlhint eslint-plugin-html
 
       - name: Lint JavaScript (embedded in HTML)
         run: |
-          # Lint inline via plugin
-          npx eslint --ext .html --plugin html index.html
+          # Lint using legacy config for v8 compatibility
+          npx eslint --ext .html --plugin html --config .eslintrc.json index.html
 
       - name: Validate HTML
         run: |
