@@ -1,11 +1,11 @@
 # DNA Florida List Dashboard
 
-[![GitHub Pages Deploy](https://github.com/EliteGreylT67/DNAFLapp/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/EliteGreylT67/DNAFLapp/actions/workflows/ci-cd.yml)  
+[![GitHub Pages Deploy](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml)  
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A dynamic, self-contained web dashboard for exploring DNA Florida lists, sourced live from Google Sheets. Features intuitive tabs for "DNA List" and "BCAC DNA List", with powerful search, filtering, sorting, pagination, and CSV export capabilities. Built with vanilla HTML/JS, Tailwind CSS for styling, and optimized for mobile/dark mode. Automated CI/CD via GitHub Actions ensures code quality and effortless deployment to GitHub Pages.
 
-**Live Demo**: [https://EliteGreylT67.github.io/DNAFLapp/](https://EliteGreylT67.github.io/DNAFLapp/)
+**Live Demo**: [https://EliteGreylT67.github.io/DNAFL-app/](https://EliteGreylT67.github.io/DNAFL-app/)
 
 ![Dashboard Screenshot](assets/screenshot-dashboard-light.png)  
 Screenshot: DNA List tab in light mode (add your own image to assets/ for visuals).
@@ -28,7 +28,7 @@ Screenshot: DNA List tab in light mode (add your own image to assets/ for visual
 1. **Clone the Repository**:
    
    ```bash
-   git clone https://github.com/EliteGreylT67/DNAFLapp.git
+   git clone https://github.com/EliteGreylT67/DNAFL-app.git
    cd DNAFLapp
    ```
 
@@ -43,7 +43,7 @@ Screenshot: DNA List tab in light mode (add your own image to assets/ for visual
 4. **Deployment**:
    - The `.github/workflows/ci-cd.yml` automates deployment to GitHub Pages on pushes to `main`.
    - Enable Pages in repo Settings > Pages > Source: GitHub Actions.
-   - Access at `https://EliteGreylT67.github.io/DNAFLapp/`.
+   - Access at `https://EliteGreylT67.github.io/DNAFL-app/`.
 
 ## Usage
 1. **Open the Dashboard**: Load `index.html` locally or via the deployed URL.
