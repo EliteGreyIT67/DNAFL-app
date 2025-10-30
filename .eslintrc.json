@@ -10,12 +10,12 @@
     "es2021": true
   },
   "globals": {
-    "tailwind": "writable"  // Declare for CDN script config
+    "tailwind": "writable"  // Declare CDN global for config assignment
   },
   "rules": {
     "no-console": "off",  // Allow console for debugging
     "no-unused-vars": "warn",  // Warn on unused vars for flexibility
-    "no-undef": "warn",  // Downgrade to warn so CI doesn't fail on globals
+    "no-undef": "warn",  // Warn on undef to flag without failing CI
     "prefer-const": "error"  // Enforce const for immutables
   },
   "ignorePatterns": ["node_modules/", "dist/"]  // Ignore common dirs
