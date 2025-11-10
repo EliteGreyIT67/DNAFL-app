@@ -4,7 +4,7 @@
 
 A lightweight, client-side web dashboard for exploring and managing Florida animal abuser registries and enjoined lists (under Florida Statute 828.27). Pulls live data from public Google Sheets (aggregated via automated scraping) for real-time viewing, filtering, and exporting. No backend required—runs entirely in the browser.
 
-**Live Demo**: [https://elitedgreyit67.github.io/DNAFL-app/](https://elitedgreyit67.github.io/DNAFL-app/)
+**Live Demo**: [https://elitegreyit67.github.io/DNAFL-app/](https://elitegreyit67.github.io/DNAFL-app/)
 
 ## Table of Contents
 - [Features](#features)
