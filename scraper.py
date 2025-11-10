@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.0 (Targeted Sources)
+DNAFL Scraper v3.1 (Targeted Sources)
 Aggregates Florida animal abuser registries using specific user-provided endpoints.
 """
 
