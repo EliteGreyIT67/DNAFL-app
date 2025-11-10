@@ -17,6 +17,7 @@ from selenium.webdriver.chrome.options import Options  # Chrome config
 from selenium.common.exceptions import TimeoutException, NoSuchElementException  # Error handling
 from webdriver_manager.chrome import ChromeDriverManager  # Auto-install ChromeDriver
 import time  # For delays
+import sys  # For --dry-run flag
 
 # === CONFIGURATION ===
 # Customize these:
@@ -24,6 +25,7 @@ SHEET_ID = '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY'  # Your master Google 
 CREDENTIALS_FILE = 'credentials.json'  # Path to your service account JSON key
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']  # API scopes for read/write
 SELENIUM_TIMEOUT = 10  # Seconds to wait for elements (adjust for slow sites)
+DRY_RUN = '--dry-run' in sys.argv  # CI flag: Skip writes
 
 # Setup logging: Outputs to console with timestamps
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -61,6 +63,10 @@ def update_sheet(sheet_name, df):
         
         if df.empty:
             logger.info(f"No new data for {sheet_name}")
+            return
+        
+        if DRY_RUN:
+            logger.info(f"DRY RUN: Would add {len(df)} rows to {sheet_name}")
             return
         
         # Append rows (RAW option preserves formatting)
@@ -147,14 +153,15 @@ def parse_html_to_df(url, county, table_selector='table'):
         logger.error(f"HTML scrape failed for {url}: {e}")
         return pd.DataFrame()
 
-def scrape_dynamic_with_selenium(url, county, search_input_id, submit_id, table_selector, search_terms=None):
+def scrape_dynamic_with_selenium(url, county, search_input_id='search', submit_id='submit', table_selector='table.results', search_terms=None):
     """
     Scrape dynamic site with Selenium: Navigate, search (loop terms if provided), parse results.
-    - search_terms: List like ['A', 'B', ..., 'Z'] for A-Z scrape; or single wildcard '*'.
+    - Defaults to generic IDs; customize per site.
+    - search_terms: List like [''] for blank, or ['A'..'Z'].
     - Returns combined DF from all searches.
     """
     if search_terms is None:
-        search_terms = ['*']  # Default: single broad search
+        search_terms = ['']  # Default: blank search for all
     
     options = Options()
     options.add_argument('--headless')  # Run without UI
@@ -172,38 +179,42 @@ def scrape_dynamic_with_selenium(url, county, search_input_id, submit_id, table_
         logger.info(f"Loaded dynamic page: {url}")
         
         for term in search_terms:
-            # Find and fill search input
-            search_input = wait.until(EC.presence_of_element_located((By.ID, search_input_id)))
-            search_input.clear()
-            search_input.send_keys(term)
-            
-            # Submit search
-            submit_btn = driver.find_element(By.ID, submit_id)
-            submit_btn.click()
-            
-            # Wait for results table
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, table_selector)))
-            logger.info(f"Fetched results for search term: {term}")
-            
-            # Parse table with BeautifulSoup
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            table = soup.select_one(table_selector)
-            if table:
-                df_temp = pd.read_html(str(table))[0]
-                # Standardize: Assume cols like Name, Date, etc.; add County/Link
-                df_temp['County'] = county
-                df_temp['Link'] = 'N/A'
-                col_map = {df_temp.columns[0]: 'Name', df_temp.columns[1]: 'Date'}
-                if len(df_temp.columns) > 2:
-                    col_map[df_temp.columns[2]] = 'Details'
-                df_temp = df_temp.rename(columns=col_map)
-                df_temp = df_temp[['Name', 'County', 'Date', 'Details', 'Link']]
-                all_data.append(df_temp)
-            else:
-                logger.warning(f"No table found after search '{term}'")
-            
-            # Delay between searches (polite scraping)
-            time.sleep(2)
+            try:
+                # Find and fill search input (generic ID)
+                search_input = wait.until(EC.presence_of_element_located((By.ID, search_input_id)))
+                search_input.clear()
+                search_input.send_keys(term)
+                
+                # Submit search (generic)
+                submit_btn = driver.find_element(By.ID, submit_id)
+                submit_btn.click()
+                
+                # Wait for results table
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, table_selector)))
+                logger.info(f"Fetched results for search term: {term}")
+                
+                # Parse table with BeautifulSoup
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                table = soup.select_one(table_selector)
+                if table:
+                    df_temp = pd.read_html(str(table))[0]
+                    # Standardize: Assume cols like Name, Date, etc.; add County/Link
+                    df_temp['County'] = county
+                    df_temp['Link'] = 'N/A'
+                    col_map = {df_temp.columns[0]: 'Name', df_temp.columns[1]: 'Date'}
+                    if len(df_temp.columns) > 2:
+                        col_map[df_temp.columns[2]] = 'Details'
+                    df_temp = df_temp.rename(columns=col_map)
+                    df_temp = df_temp[['Name', 'County', 'Date', 'Details', 'Link']]
+                    all_data.append(df_temp)
+                else:
+                    logger.warning(f"No table found after search '{term}'")
+                
+                # Delay between searches (polite scraping)
+                time.sleep(2)
+            except (TimeoutException, NoSuchElementException) as e:
+                logger.warning(f"Search term '{term}' failed: {e} - skipping")
+                continue
         
         # Combine all results
         if all_data:
@@ -245,14 +256,19 @@ def scrape_lee_enjoined():
     url = 'https://www.sheriffleefl.org/animal-abuser-registry-enjoined/'
     return parse_html_to_df(url, 'Lee', 'table')  # Generic table selector
 
-# Dynamic with Selenium
+# Collier: Use static alt URL for full table
 def scrape_collier():
-    """Scrape Collier dynamic registry: A-Z search for full list."""
-    url = 'https://animalabuserregistry.ccsheriff.org/'
-    # Customize: ID of search input/submit, table CSS, search terms (A-Z for names)
-    return scrape_dynamic_with_selenium(url, 'Collier', 'searchInput', 'submitBtn', 'table.results-table', 
-                                        search_terms=[chr(i) for i in range(65, 91)])  # A-Z
+    """Scrape Collier static table (e.g., MCCORD DEREK, CHRISTIAN ALLISON)."""
+    url = 'https://www2.colliersheriff.org/animalabusesearch'
+    df = parse_html_to_df(url, 'Collier', 'table')  # Assumes first table; samples show Type, Name, DOB, etc. → maps to Name/Details
+    if not df.empty:
+        # Post-process: Combine Type/Charge into Details
+        if 'Type' in df.columns:
+            df['Details'] = df['Type'].astype(str) + ' | ' + df['Details']
+            df = df.drop('Type', axis=1)
+    return df
 
+# Dynamic with Selenium
 def scrape_brevard():
     """Scrape Brevard dynamic search: A-Z for offenders."""
     url = 'https://www.brevardfl.gov/AnimalAbuseDatabaseSearch'
@@ -265,21 +281,67 @@ def scrape_miami_dade():
     return scrape_dynamic_with_selenium(url, 'Miami-Dade', 'searchField', 'searchSubmit', '.cruelty-table', 
                                         search_terms=['*'])  # Wildcard for all
 
+# New: Leon (no data)
+def scrape_leon():
+    """Leon/Tallahassee: Informational only, no list."""
+    logger.info("Leon: No public list available - skipping.")
+    return pd.DataFrame()
+
+# New: Hillsborough Registry (dynamic search)
+def scrape_hillsborough_registry():
+    """Hillsborough Registry: Generic dynamic search (update IDs if needed)."""
+    url = 'https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry/search-the-registry'
+    return scrape_dynamic_with_selenium(url, 'Hillsborough', 'searchInput', 'searchSubmit', '#resultsTable', 
+                                        search_terms=[''])  # Blank for all
+
+# New: Marion Enjoined (dynamic, blank search)
+def scrape_marion_enjoined():
+    """Marion Enjoined: Blank search for full list."""
+    url = 'https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/civil-enjoinment-list'
+    return scrape_dynamic_with_selenium(url, 'Marion', 'queryInput', 'queryBtn', 'table.enjoinments', 
+                                        search_terms=[''])  # Blank
+
+# New: Seminole (PDF)
+def scrape_seminole():
+    """Scrape Seminole Abuse PDF."""
+    url = 'https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf'
+    return parse_pdf_to_df(url, 'Seminole')
+
+# New: Pasco (dynamic, blank attempt)
+def scrape_pasco():
+    """Pasco Registry: Blank/wildcard search (may need DOB/name loops)."""
+    url = 'https://app.pascoclerk.com/animalabusersearch/'
+    return scrape_dynamic_with_selenium(url, 'Pasco', 'lastName', 'searchBtn', '#searchResults', 
+                                        search_terms=['*', ''])  # Wildcard + blank
+
+# New: Lee Search (dynamic)
+def scrape_lee_search():
+    """Lee Search: Dynamic with A-Z for full."""
+    url = 'https://www.sheriffleefl.org/animal-abuser-search/'
+    return scrape_dynamic_with_selenium(url, 'Lee', 'nameSearch', 'searchSubmit', '.results-table', 
+                                        search_terms=[chr(i) for i in range(65, 91)])  # A-Z
+
 # === MAIN EXECUTION ===
 if __name__ == '__main__':
-    logger.info("Starting automated scrape for DNAFL-app (with Selenium)...")
+    logger.info("Starting automated scrape for DNAFL-app (all sources)...")
     start_time = datetime.now()
     
-    # Static/PDF scrapers
+    # Existing
     update_sheet('Hillsborough Enjoined', scrape_hillsborough())
     update_sheet('Volusia Abuse', scrape_volusia())
     update_sheet('Marion Registry', scrape_marion_registry())
     update_sheet('Lee Enjoined', scrape_lee_enjoined())
-    
-    # Dynamic Selenium scrapers (comment out if testing without browser)
     update_sheet('Collier Registry', scrape_collier())
     update_sheet('Brevard Registry', scrape_brevard())
     update_sheet('Miami-Dade Cruelty', scrape_miami_dade())
     
+    # New
+    update_sheet('Leon Abuse', scrape_leon())
+    update_sheet('Hillsborough Registry', scrape_hillsborough_registry())
+    update_sheet('Marion Enjoined', scrape_marion_enjoined())
+    update_sheet('Seminole PDF', scrape_seminole())
+    update_sheet('Pasco Registry', scrape_pasco())
+    update_sheet('Lee Search', scrape_lee_search())
+    
     logger.info(f"Scrape complete in {datetime.now() - start_time}. Check your Google Sheet for updates.")
-    logger.info("Tip: Update DNAFL-app 'tables' config with new sheet URLs for auto-tabs.")
+    logger.info("Tip: Update DNAFL-app 'tables' config with new sheet URLs for auto-tabs. For dynamics, tweak selectors if empty.")
