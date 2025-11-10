@@ -32,7 +32,7 @@ jobs:
 
     - name: Test scraper (dry run)
       run: |
-        python scraper.py  # Full run, but in CI it updates sheets via secrets
+        python scraper.py --dry-run  # Full run, but in CI it updates sheets via secrets
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
 
