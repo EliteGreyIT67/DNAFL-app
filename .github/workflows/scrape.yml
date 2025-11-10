@@ -1,34 +1,48 @@
-name: Auto-Scrape Registries
+name: Scrape Registries CI/CD
+
 on:
+  push:
+    branches: [ main ]
+    paths: [ 'scraper.py', 'requirements.txt' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'scraper.py', 'requirements.txt' ]
   schedule:
     - cron: '0 2 * * *'  # Daily at 2 AM UTC
-  workflow_dispatch:  # Manual trigger via GitHub UI
+  workflow_dispatch:  # Manual trigger
+
 jobs:
-  scrape:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
+
     - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Lint Python
       run: |
-        pip install gspread oauth2client requests pandas pdfplumber beautifulsoup4 selenium webdriver-manager
-    - name: Install Chrome
+        pip install flake8
+        flake8 scraper.py  # Python linting
+
+    - name: Test scraper (dry run)
       run: |
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-    - name: Run scraper
+        python scraper.py  # Full run, but in CI it updates sheets via secrets
       env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}  # Upload JSON as repo secret
-      run: |
-        echo "$GOOGLE_CREDENTIALS" > credentials.json
-        python scraper.py
-    - name: Commit sheet updates (if any)
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+    - name: Commit updates (if sheets changed)
+      if: github.event_name != 'pull_request'
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
         git diff --staged --quiet || git commit -m "Auto-update registries [$(date +%Y-%m-%d)]"
         git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
