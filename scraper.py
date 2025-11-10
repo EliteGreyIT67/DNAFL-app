@@ -171,16 +171,51 @@ def scrape_marion():
 
 def scrape_hillsborough():
     data = []
-    # 1. Enjoined PDF
+    # 1. Enjoined PDF (Improved with structured table extraction)
+    pdf_url = "https://assets.contentstack.io/v3/assets/blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
     try:
-        lines = extract_text_from_pdf("https://assets.contentstack.io/v3/assets/blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf")
-        for line in lines:
-             # Basic name detection heuristic (Last, First Middle)
-            if re.match(r'^[A-Z]+,\s+[A-Z]+', line):
-                parts = [p.strip() for p in line.split('   ') if p.strip()]
-                if len(parts) >= 1:
-                    data.append({'Name': parts[0], 'Date': 'Unknown', 'County': 'Hillsborough', 'Source': 'Hillsborough Enjoined PDF', 'Type': 'Enjoined', 'Details': line})
-    except Exception as e: alert_failure(f"Hillsborough PDF failed: {str(e)[:200]}")
+        # Use existing fetch_url helper for robust retries/timeouts
+        resp = fetch_url(pdf_url, stream=True, verify=False)
+        
+        with pdfplumber.open(resp.raw) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    if not table or len(table) < 2: continue
+                    
+                    # Normalize headers
+                    headers = [str(h).strip() for h in table[0]]
+                    
+                    for row in table[1:]:
+                        # Map row to headers safely
+                        row_data = dict(zip(headers, [str(cell).strip() if cell else '' for cell in row]))
+                        
+                        # Ensure essential name fields exist before processing
+                        if 'Last Name' in row_data and 'First Name' in row_data:
+                            name = f"{row_data.get('Last Name', '')} {row_data.get('First Name', '')}".strip()
+                            # Skip empty rows that might have been misread
+                            if not name: continue
+
+                            # Compile details from extra columns
+                            details_parts = []
+                            if row_data.get('Case Number'): 
+                                details_parts.append(f"Case: {row_data['Case Number']}")
+                            if row_data.get('End Date'): 
+                                details_parts.append(f"End: {row_data['End Date']}")
+                            if row_data.get('Special Restrictions'): 
+                                details_parts.append(f"Restrictions: {row_data['Special Restrictions']}")
+
+                            data.append({
+                                'Name': name,
+                                'Date': row_data.get('Start Date', 'Unknown'),
+                                'County': 'Hillsborough',
+                                'Source': 'Hillsborough Enjoined PDF',
+                                'Type': 'Enjoined',
+                                'Details': ' | '.join(details_parts)
+                            })
+                            
+    except Exception as e: 
+        alert_failure(f"Hillsborough PDF improved scraper failed: {str(e)[:200]}")
 
     # 2. General Registry (Selenium fallback for dynamic search)
     try:
@@ -190,8 +225,17 @@ def scrape_hillsborough():
             for row in driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]:
                 cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
                 if len(cols) >= 2:
-                    data.append({'Name': cols[0], 'Date': cols[1], 'County': 'Hillsborough', 'Source': 'Hillsborough Registry', 'Type': 'Convicted', 'Details': ' | '.join(cols[2:])})
-    except Exception as e: alert_failure(f"Hillsborough Search failed: {str(e)[:200]}")
+                    data.append({
+                        'Name': cols[0], 
+                        'Date': cols[1], 
+                        'County': 'Hillsborough', 
+                        'Source': 'Hillsborough Registry', 
+                        'Type': 'Convicted', 
+                        'Details': ' | '.join(cols[2:])
+                    })
+    except Exception as e: 
+        alert_failure(f"Hillsborough Search failed: {str(e)[:200]}")
+        
     return pd.DataFrame(data)
 
 def scrape_volusia():
