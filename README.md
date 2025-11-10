@@ -24,7 +24,8 @@ A lightweight, client-side web dashboard for exploring and managing Florida anim
   - Date range picker (handles formats like YYYY-MM-DD, MM-YY).
   - Column sorting (Name A-Z, Date newest/oldest).
 - **Pagination & Export**: 50 rows/page; export filtered/sorted results as CSV.
-- **UX Enhancements**: Dark mode (persists via localStorage), responsive design (mobile/desktop), sticky headers, ARIA labels for accessibility.
+- **Charts Visualization**: Toggle bar charts for record counts by county (powered by Chart.js)—quick insights into data distribution.
+- **UX Enhancements**: Dark/light mode (persists via localStorage), responsive design (mobile/desktop), sticky headers, ARIA labels for accessibility.
 - **Data Handling**: Real-time CSV fetches from Google Sheets; multiline support, invalid date warnings, error handling.
 - **Automation**: Python scraper updates sheets daily via GitHub Actions; CI/CD for linting/testing/deploys.
 
@@ -37,13 +38,13 @@ A lightweight, client-side web dashboard for exploring and managing Florida anim
    ```
    Visit `http://localhost:8000`.
 
-2. **View Demo**: Click the live link above—tabs load county data on switch.
+2. **View Demo**: Click the live link above—tabs load county data on switch. Toggle charts for visuals.
 
 3. **Customize Data**: Edit `SHEET_ID` in `index.html` or `scraper.py` for your Google Sheet.
 
 ## Installation & Setup
 ### For the Web App
-- **Dependencies**: None—uses vanilla HTML/JS + Tailwind CSS (CDN).
+- **Dependencies**: None—uses vanilla HTML/JS + Tailwind CSS (CDN) + Chart.js (CDN).
 - **Data Source**: Public Google Sheet (ID: `1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY`). Sheets like "DNA List", "Lee Enjoined" auto-generate tabs.
 - **Local Dev**: Serve via any static server (Python, VS Code Live Server). Edit `tables` object in `<script>` to add/remove tabs.
 
@@ -81,13 +82,14 @@ webdriver-manager
 ## Usage
 ### Web Dashboard
 - **Tabs**: Click to load (e.g., "Collier Registry" shows scraped entries).
+- **Charts**: Click "📈 Show Charts" (after loading a tab) for bar graph of county/record counts.
 - **Filters**:
   - Search: Type keywords (searches Name, County, Details).
   - County: Dropdown from unique values.
-  - Date: Pick range (e.g., 2024-01-01 to 2025-11-09).
+  - Date: Pick range (e.g., 2024-01-01 to 2025-11-10).
   - Sort: Name ascending or Date newest.
 - **Export**: Click "📊 Export CSV" for filtered data (filename: `DNAFL-[tab]-[date].csv`).
-- **Mobile**: Responsive—scroll horizontally for tables.
+- **Mobile**: Responsive—scroll horizontally for tables; pinch-zoom charts.
 
 ### Scraper
 - Fetches from 15+ sources (PDFs, HTML tables, dynamic searches via Selenium).
@@ -115,7 +117,7 @@ View runs: [GitHub Actions](https://github.com/EliteGreyIT67/DNAFL-app/actions).
 ## Contributing
 1. Fork → Branch (e.g., `feature/new-county`).
 2. Lint locally:
-   - App: `eslint index.html && htmlhint index.html`
+   - App: `eslint --plugin html index.html && htmlhint index.html`
    - Scraper: `pip install flake8 && flake8 scraper.py`
 3. Test: Run app/scraper; check sheets.
 4. PR to `main`: Describe changes (e.g., "Add Pasco scraper").
@@ -126,10 +128,10 @@ Issues/PRs welcome! Assisted by xAI's Grok.
 MIT License. See [LICENSE](LICENSE).
 
 ## Roadmap
-- Charts: Visualize enjoinments by county/date (Chart.js).
 - Auth: Private Sheets access.
 - Backups: Auto-export sheets to repo.
 - More Counties: Escambia, Orange, etc.
 - Fuzzy Search: For name variations.
+- Advanced Charts: Date trends, exportable PNGs.
 
 Questions? Open an issue or ping @EliteGreyIT67. Thanks for using DNAFL-app—protecting animals, one list at a time! 🐾
