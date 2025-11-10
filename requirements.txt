@@ -1,0 +1,8 @@
+gspread
+oauth2client
+requests
+pandas
+pdfplumber
+beautifulsoup4
+selenium
+webdriver-manager
