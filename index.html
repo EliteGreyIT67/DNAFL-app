@@ -79,6 +79,9 @@
             <button id="tab-bcac" class="tab-btn w-full sm:w-auto px-4 py-3 text-base sm:text-lg font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 focus:outline-none" data-tab="bcac-content" role="tab" aria-selected="false" aria-controls="bcac-content">
                 BCAC DNA List
             </button>
+            <button id="tab-sources" class="tab-btn w-full sm:w-auto px-4 py-3 text-base sm:text-lg font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 focus:outline-none" data-tab="sources-content" role="tab" aria-selected="false" aria-controls="sources-content">
+                Official Data Sources
+            </button>
         </div>
 
         <!-- Tab Content Area -->
@@ -180,6 +183,151 @@
                         <button id="prev-bcac" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Prev</button>
                         <span id="page-info-bcac" class="text-sm text-gray-700 dark:text-gray-300"></span>
                         <button id="next-bcac" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-50">Next</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Official Data Sources Tab Content -->
+            <div id="sources-content" class="tab-pane hidden" role="tabpanel" aria-labelledby="tab-sources">
+                <div class="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl sm:text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-300">Official Florida Animal Abuser Registries</h2>
+                    <p class="mb-6 text-gray-600 dark:text-gray-400">
+                        The data in this dashboard is cross-referenced from various official county and state resources.
+                        Use the links below to verify information directly with the source.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Brevard County -->
+                        <a href="https://www.brevardfl.gov/AnimalAbuseDatabaseSearch" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Brevard County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Animal Abuse Database Search</p>
+                        </a>
+
+                        <!-- Citrus County -->
+                        <a href="https://animalabuserregistry.ccsheriff.org/" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Citrus County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Sheriff's Office Animal Abuser Registry</p>
+                        </a>
+
+                        <!-- Collier County -->
+                        <a href="https://www2.colliersheriff.org/animalabusesearch" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Collier County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Sheriff's Office Animal Abuse Search</p>
+                        </a>
+
+                        <!-- Hillsborough County -->
+                        <div class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <h3 class="text-lg font-medium text-gray-700 dark:text-gray-300 flex items-center">
+                                Hillsborough County
+                            </h3>
+                            <div class="mt-2 space-y-2">
+                                <a href="https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry/search-the-registry" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Search the Registry
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                                <a href="https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry/search-enjoined-list" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Search Enjoined List
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Lee County -->
+                        <div class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <h3 class="text-lg font-medium text-gray-700 dark:text-gray-300 flex items-center">
+                                Lee County
+                            </h3>
+                            <div class="mt-2 space-y-2">
+                                <a href="https://www.sheriffleefl.org/animal-abuser-search/" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Animal Abuser Search
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                                <a href="https://www.sheriffleefl.org/animal-abuser-registry-enjoined/" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Enjoined Registry
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Marion County -->
+                        <div class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <h3 class="text-lg font-medium text-gray-700 dark:text-gray-300 flex items-center">
+                                Marion County
+                            </h3>
+                            <div class="mt-2 space-y-2">
+                                <a href="https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Animal Abuser Registry
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                                <a href="https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/civil-enjoinment-list" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center">
+                                    Civil Enjoinment List
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 ml-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Miami-Dade County -->
+                        <a href="https://www.miamidade.gov/Apps/ASD/crueltyweb/" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Miami-Dade County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Animal Cruelty Investigations</p>
+                        </a>
+
+                        <!-- Pasco County -->
+                        <a href="https://app.pascoclerk.com/animalabusersearch/" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Pasco County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Clerk & Comptroller Animal Abuser Search</p>
+                        </a>
+
+                        <!-- Seminole County -->
+                        <a href="https://www.seminolecountyfl.gov/departments-services/prepare-seminole/animal-services/animal-abuse-registry" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Seminole County
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Animal Abuse Registry</p>
+                        </a>
+
+                        <!-- Tallahassee -->
+                        <a href="https://www.talgov.com/animals/asc-abuse" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-blue-600 dark:text-blue-400 group-hover:underline flex items-center">
+                                Tallahassee
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Animal Abuser Registry</p>
+                        </a>
+
+                        <!-- Volusia County (PDF) -->
+                        <a href="https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-red-600 dark:text-red-400 group-hover:underline flex items-center">
+                                Volusia County (PDF)
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Official Animal Abuse List (PDF Document)</p>
+                        </a>
+
+                        <!-- Additional Enjoinment List (PDF) -->
+                        <a href="https://assets.contentstack.io/v3/assets/blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf" target="_blank" rel="noopener noreferrer" class="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group">
+                            <h3 class="text-lg font-medium text-red-600 dark:text-red-400 group-hover:underline flex items-center">
+                                Additional Enjoinment List (PDF)
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Civil Enjoinment List Document</p>
+                        </a>
                     </div>
                 </div>
             </div>
