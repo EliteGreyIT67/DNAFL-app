@@ -21,8 +21,7 @@ jobs:
 
     - name: Install ESLint & HTML Plugin
       run: |
-        npm install --global eslint eslint-plugin-html  # Fixed: Use plugin for HTML+JS linting
-        npm install --global htmlhint  # For HTML validation
+        npm install eslint eslint-plugin-html htmlhint  # Local install for CI
 
     - name: Lint HTML/JS
       run: |
