@@ -19,12 +19,14 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install ESLint
-      run: npm install eslint eslint-config-html --global
+    - name: Install ESLint & HTML Plugin
+      run: |
+        npm install --global eslint eslint-plugin-html  # Fixed: Use plugin for HTML+JS linting
+        npm install --global htmlhint  # For HTML validation
 
     - name: Lint HTML/JS
       run: |
-        eslint --max-warnings=10 index.html  # Lints inline JS
+        eslint --plugin html --max-warnings=10 index.html  # Lints inline JS in <script>; allow warnings
         htmlhint index.html  # HTML validation
 
     - name: Test (basic smoke test)
