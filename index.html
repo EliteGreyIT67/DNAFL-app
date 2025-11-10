@@ -6,6 +6,8 @@
     <title>DNA Florida App - Do Not Adopt Lists</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Fuse.js CDN for fuzzy search -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@latest/dist/fuse.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -43,7 +45,7 @@
     <!-- Filters Row -->
     <div class="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
         <!-- Global Search -->
-        <input type="text" id="globalSearch" placeholder="Search all columns..." class="p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800" aria-label="Global search">
+        <input type="text" id="globalSearch" placeholder="Search all columns... (use /regex/ for patterns)" class="p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800" aria-label="Global search">
 
         <!-- County Filter -->
         <select id="countyFilter" class="p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800" aria-label="Filter by county">
@@ -101,8 +103,8 @@
 
     <script>
         // === CONFIG ===
-        const SHEET_ID = '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY';  // Your master Google Sheet ID
-        const PAGE_SIZE = 1000;  // Rows per page
+        const SHEET_ID = '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY'; // Your master Google Sheet ID
+        const PAGE_SIZE = 1000; // Rows per page
         const BASE_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=`;
 
         const tables = {
@@ -171,9 +173,10 @@
         let currentData = [];
         let filteredData = [];
         let currentPage = 1;
-        let currentTab = 'dna';  // Default tab
-        let counties = new Set();  // For filter options
-        let chartInstance = null;  // For chart cleanup
+        let currentTab = 'dna'; // Default tab
+        let counties = new Set(); // For filter options
+        let chartInstance = null; // For chart cleanup
+        let fuseInstance = null; // For fuzzy search
 
         // Dark mode toggle
         const darkToggle = document.getElementById('darkToggle');
@@ -220,7 +223,7 @@
                         const obj = {};
                         headers.forEach((header, i) => obj[header] = values[i] || '');
                         return obj;
-                    }).filter(row => row.Name && row.Name.trim());  // Skip empty
+                    }).filter(row => row.Name && row.Name.trim()); // Skip empty
                     return rows;
                 })
                 .catch(err => {
@@ -275,14 +278,14 @@
         // === RENDERING ===
         function renderTabs() {
             const nav = document.getElementById('tabsNav');
-            nav.innerHTML = Object.entries(tables).map(([key, { label }], i) => 
+            nav.innerHTML = Object.entries(tables).map(([key, { label }], i) =>
                 `<button class="tab-btn px-4 py-2 ${key === currentTab ? 'border-b-2 border-blue-500' : ''} hover:text-blue-500" data-tab="${key}" aria-label="Switch to ${label} tab">${label}</button>`
             ).join('');
         }
 
         function renderCountyFilter() {
             const select = document.getElementById('countyFilter');
-            select.innerHTML = '<option value="">All Counties</option>' + 
+            select.innerHTML = '<option value="">All Counties</option>' +
                 Array.from(counties).sort().map(c => `<option value="${c}">${c}</option>`).join('');
         }
 
@@ -305,7 +308,7 @@
             renderPagination(data.length);
         }
 
-        /* global changePage */  // ESLint: Declare global to avoid "never used" flag
+        /* global changePage */ // ESLint: Declare global to avoid "never used" flag
         function renderPagination(total) {
             const totalPages = Math.ceil(total / PAGE_SIZE);
             const pag = document.getElementById('pagination');
@@ -315,7 +318,7 @@
             }
             pag.innerHTML = `
                 <button class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded ${currentPage === 1 ? 'invisible' : ''}" onclick="changePage(${currentPage - 1})" aria-label="Previous page">‹</button>
-                ${Array.from({ length: Math.min(5, totalPages) }, (_, unused_i) => {  // ESLint: Rename _ to unused_i
+                ${Array.from({ length: Math.min(5, totalPages) }, (_, unused_i) => { // ESLint: Rename _ to unused_i
                     const p = currentPage > 3 ? currentPage - 2 + unused_i : unused_i + 1;
                     return `<button class="px-3 py-1 ${p === currentPage ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700'} rounded" onclick="changePage(${p})" aria-label="Page ${p}">${p}</button>`;
                 }).join('')}
@@ -326,17 +329,30 @@
         // === FILTERING & SORTING ===
         function applyFiltersAndSort() {
             let data = [...currentData];
-            const search = document.getElementById('globalSearch').value.toLowerCase();
+            const searchQuery = document.getElementById('globalSearch').value.trim();
             const county = document.getElementById('countyFilter').value;
             const dateFrom = document.getElementById('dateFrom').value ? new Date(document.getElementById('dateFrom').value) : new Date(0);
             const dateTo = document.getElementById('dateTo').value ? new Date(document.getElementById('dateTo').value) : new Date();
             const [sortCol, sortDir] = document.getElementById('sortSelect').value.split('-');
 
-            // Search
-            if (search) {
-                data = data.filter(row => 
-                    Object.values(row).some(val => val.toString().toLowerCase().includes(search))
-                );
+            // Enhanced Search: Fuzzy or Regex
+            if (searchQuery) {
+                if (searchQuery.startsWith('/') && searchQuery.endsWith('/')) {
+                    // Regex mode
+                    try {
+                        const regex = new RegExp(searchQuery.slice(1, -1), 'i');
+                        data = data.filter(row =>
+                            Object.values(row).some(val => regex.test(val.toString()))
+                        );
+                    } catch (e) {
+                        showError('Invalid regex pattern');
+                        return;
+                    }
+                } else {
+                    // Fuzzy mode with Fuse.js
+                    const results = fuseInstance.search(searchQuery);
+                    data = results.map(result => result.item);
+                }
             }
 
             // County
@@ -373,7 +389,7 @@
             toggleChartsBtn();
         }
 
-        /* global changePage */  // ESLint: Already declared above, but reinforce for scope
+        /* global changePage */ // ESLint: Already declared above, but reinforce for scope
         function changePage(page) {
             currentPage = page;
             renderTable();
@@ -412,6 +428,12 @@
             showLoading(true);
             document.getElementById('error').classList.add('hidden');
             currentData = await fetchCSV(url);
+            // Initialize Fuse.js for fuzzy search on all keys
+            fuseInstance = new Fuse(currentData, {
+                keys: Object.keys(currentData[0] || {}), // All columns
+                threshold: 0.3, // Adjust for fuzziness (0 = exact, 1 = loose)
+                ignoreLocation: true
+            });
             counties.clear();
             currentData.forEach(row => {
                 if (row.County && row.County.trim()) counties.add(row.County.trim());
@@ -424,7 +446,7 @@
 
         // Init
         renderTabs();
-        document.querySelector('.tab-btn')?.click();  // Load default tab
+        document.querySelector('.tab-btn')?.click(); // Load default tab
         document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', (e) => changeTab(e.target.dataset.tab)));
     </script>
 </body>
