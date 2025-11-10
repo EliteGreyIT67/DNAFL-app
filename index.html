@@ -257,6 +257,7 @@
             renderPagination(data.length);
         }
 
+        /* global changePage */  // ESLint: Declare global to avoid "never used" flag
         function renderPagination(total) {
             const totalPages = Math.ceil(total / PAGE_SIZE);
             const pag = document.getElementById('pagination');
@@ -266,8 +267,8 @@
             }
             pag.innerHTML = `
                 <button class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded ${currentPage === 1 ? 'invisible' : ''}" onclick="changePage(${currentPage - 1})" aria-label="Previous page">‹</button>
-                ${Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const p = currentPage > 3 ? currentPage - 2 + i : i + 1;
+                ${Array.from({ length: Math.min(5, totalPages) }, (_, unused_i) => {  // ESLint: Rename _ to unused_i
+                    const p = currentPage > 3 ? currentPage - 2 + unused_i : unused_i + 1;
                     return `<button class="px-3 py-1 ${p === currentPage ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700'} rounded" onclick="changePage(${p})" aria-label="Page ${p}">${p}</button>`;
                 }).join('')}
                 <button class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded ${currentPage === totalPages ? 'invisible' : ''}" onclick="changePage(${currentPage + 1})" aria-label="Next page">›</button>
@@ -323,6 +324,7 @@
             loadData(tables[tabKey].url);
         }
 
+        /* global changePage */  // ESLint: Already declared above, but reinforce for scope
         function changePage(page) {
             currentPage = page;
             renderTable();
