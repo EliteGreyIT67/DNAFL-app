@@ -2,7 +2,7 @@
 """
 DNAFL Scraper: Fetches Florida animal abuser registries from 15+ sources, dedupes, and uploads to Google Sheets.
 Runs daily via GitHub Actions at 2 AM UTC.
-Tech: Python 3.10+, gspread, pandas, Selenium/BS4/pdfplumber.
+Tech: Python 3.10+, gspread, pandas, Selenium/BS4/pdfplumber, concurrent.futures.
 License: MIT.
 """
 
@@ -10,11 +10,16 @@ import os
 import sys
 import logging
 from datetime import datetime
+import time
+import re
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from bs4 import BeautifulSoup
 import requests
+from bs4 import BeautifulSoup
 import pdfplumber
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -22,469 +27,481 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
-import time
-import re
 
-# Config: Hard-coded for direct runs; override with env if needed
-SHEET_ID = '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY'  # Your master Google Sheet ID
-CREDENTIALS_FILE = 'credentials.json'  # Path to your service account JSON key
-SCOPE = ['https://spreadsheets.google.com/feeds',
-         'https://www.googleapis.com/auth/drive']  # API scopes for read/write
-SELENIUM_TIMEOUT = 10  # Seconds to wait for elements (adjust for slow sites)
-DRY_RUN = '--dry-run' in sys.argv  # CI flag: Skip writes
+# Attempt to import tenacity for robust retries, fallback if not installed
+try:
+    from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+    # Dummy decorator if tenacity is missing
+    def retry(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    stop_after_attempt = wait_fixed = retry_if_exception_type = None
 
-# Setup logging: Outputs to console with timestamps
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Configuration ---
+# Use environment variables for flexibility, fallback to hardcoded defaults for local dev
+SHEET_ID = os.getenv('SHEET_ID', '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY')
+# Handle credentials from file or environment variable (common in CI/CD)
+CREDENTIALS_FILE = 'credentials.json'
+GOOGLE_CREDENTIALS_JSON = os.getenv('GOOGLE_CREDENTIALS') 
+
+SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/googleapis.com/auth/drive']
+SELENIUM_TIMEOUT = 15
+MAX_WORKERS = 3  # Adjust based on available system resources (RAM/CPU)
+DRY_RUN = '--dry-run' in sys.argv
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(threadName)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
-def auth_gspread():
-    """Authenticate and return gspread client."""
-    if not os.path.exists(CREDENTIALS_FILE):
-        raise ValueError(f"Credentials file '{CREDENTIALS_FILE}' not found. Ensure it's in the working directory.")
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPE)
-    client = gspread.authorize(creds)
-    return client
+
+# --- Helper Classes & Functions ---
+
+class SeleniumDriver:
+    """Context manager for Selenium WebDriver to ensure clean setup and teardown."""
+    def __enter__(self):
+        options = Options()
+        options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        # Add a user-agent to look less like a bot
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        # Suppress some selenium logs
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        self.driver = webdriver.Chrome(options=options)
+        return self.driver
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.driver:
+            self.driver.quit()
+
+def get_gspread_client():
+    """Authenticate and return gspread client using file or env var."""
+    if GOOGLE_CREDENTIALS_JSON:
+        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
+    elif os.path.exists(CREDENTIALS_FILE):
+        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPE)
+    else:
+        if not DRY_RUN:
+             raise ValueError(f"Credentials not found. Set GOOGLE_CREDENTIALS env var or place '{CREDENTIALS_FILE}' in working directory.")
+        return None # Return None for dry run if no creds are available
+
+    return gspread.authorize(creds)
+
+def robust_request(url, timeout=20):
+    """Wrapper for requests.get with optional tenacity retries if available."""
+    if TENACITY_AVAILABLE:
+        @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), retry_if_exception_type=(requests.RequestException))
+        def _make_request():
+             response = requests.get(url, timeout=timeout)
+             response.raise_for_status()
+             return response
+        return _make_request()
+    else:
+        # Simple fallback without retries
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response
+
+def clean_df(df):
+    """Standardizes, cleans, and dedupes the DataFrame."""
+    if df.empty:
+        return df
+    
+    # Ensure standard columns exist
+    required_cols = ['Name', 'Date', 'County', 'Source', 'Details', 'Type']
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = 'N/A'
+
+    # Robust date parsing: handle various formats and invalid dates
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    df['Date'] = df['Date'].fillna('Unknown')
+
+    # Clean text fields: remove extra spaces, handle NaNs
+    for col in ['Name', 'County', 'Details', 'Type', 'Source']:
+        df[col] = df[col].astype(str).str.strip().replace('nan', 'N/A')
+
+    # Deduplicate based on key fields
+    df = df.drop_duplicates(subset=['Name', 'Date', 'County'])
+    
+    # Final sort
+    return df.sort_values('Date', ascending=False)
 
 def append_to_sheet(df, sheet_name, client):
-    """Append DF to Sheet tab; create if missing. Skip in dry-run."""
-    if DRY_RUN:
-        logger.info(f"DRY RUN: Would append {len(df)} rows to {sheet_name}")
-        return None
+    """Uploads DataFrame to a specific Google Sheet tab."""
+    if DRY_RUN or client is None:
+        logger.info(f"[DRY RUN] Would upload {len(df)} rows to tab '{sheet_name}'")
+        return
+
     try:
-        sheet = client.open_by_key(SHEET_ID).worksheet(sheet_name)
-    except gspread.WorksheetNotFound:
-        sheet = client.open_by_key(SHEET_ID).add_worksheet(title=sheet_name, rows=1000, cols=10)
-    sheet.clear()
-    if not df.empty:
-        sheet.update([df.columns.values.tolist()] + df.values.tolist())
-    logger.info(f"Appended {len(df)} rows to {sheet_name}")
-    return sheet
-
-def dedupe_df(df):
-    """Dedupe on Name + Date; sort by Date desc."""
-    if 'Name' in df.columns and 'Date' in df.columns:
-        df = df.drop_duplicates(subset=['Name', 'Date'])
-    df = df.sort_values('Date', ascending=False)
-    return df
-
-def parse_date(date_str):
-    """Parse date to YYYY-MM-DD; fallback to original."""
-    formats = ['%m/%d/%Y', '%Y-%m-%d', '%d/%m/%Y']
-    for fmt in formats:
+        spreadsheet = client.open_by_key(SHEET_ID)
         try:
-            return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
-        except ValueError:
-            continue
-    return date_str
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=len(df)+100, cols=len(df.columns))
+            logger.info(f"Created new worksheet: {sheet_name}")
+        
+        worksheet.clear()
+        if not df.empty:
+            # gspread requires all data to be JSON serializable, so we cast to string just in case
+            worksheet.update([df.columns.values.tolist()] + df.astype(str).values.tolist())
+        logger.info(f"Uploaded {len(df)} rows to '{sheet_name}'")
+    except Exception as e:
+        logger.error(f"Failed to upload to '{sheet_name}': {e}")
 
-# Source-specific scrapers
+
+# --- Individual Scrapers ---
 
 def scrape_brevard():
-    """Scrape Brevard County Animal Abuse Database via Selenium empty search."""
-    all_data = []
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
+    logger.info("Scraping Brevard...")
+    data = []
     try:
-        driver.get("https://www.brevardfl.gov/AnimalAbuseDatabaseSearch")
-        search_box = WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.NAME, "defendantName")))
-        search_box.clear()
-        search_box.send_keys(Keys.RETURN)
-        time.sleep(3)
-        rows = driver.find_elements(By.TAG_NAME, "tr")[1:]
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, "td")
-            if len(cols) >= 2:
-                name = cols[0].text.strip()
-                date = cols[1].text.strip() if len(cols) > 1 else datetime.now().strftime('%Y-%m-%d')
-                all_data.append({
-                    'Name': name,
-                    'Date': parse_date(date),
-                    'County': 'Brevard',
-                    'Source': 'Animal Abuse Database',
-                    'Details': ' | '.join([c.text.strip() for c in cols[2:]]),
-                    'Type': 'Convicted'
-                })
-    except Exception as e:
-        logger.error(f"Brevard scrape failed: {e}")
-    finally:
-        driver.quit()
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
-
-def scrape_lee_enjoined_and_registry():
-    """Scrape Lee County Enjoined (static) and Registry (dynamic)."""
-    all_data = []
-    
-    # Static Enjoined List
-    enjoined_url = "https://www.sheriffleefl.org/animal-abuser-registry-enjoined/"
-    try:
-        response = requests.get(enjoined_url)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table')
-        if table:
-            rows = table.find_all('tr')[1:]
+        with SeleniumDriver() as driver:
+            driver.get("https://www.brevardfl.gov/AnimalAbuseDatabaseSearch")
+            search_box = WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.NAME, "defendantName")))
+            search_box.clear()
+            search_box.send_keys(Keys.RETURN)
+            
+            # Wait for table to load after search
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tr")))
+            # Slight delay to ensure full render
+            time.sleep(2) 
+            
+            rows = driver.find_elements(By.TAG_NAME, "tr")[1:]
             for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 3:
-                    name = cols[0].text.strip()
-                    case_num = cols[1].text.strip()
-                    date_str = cols[2].text.strip()
-                    condition = cols[3].text.strip() if len(cols) > 3 else ''
-                    enjoin_date = parse_date(date_str)
-                    all_data.append({
-                        'Name': name,
-                        'Date': enjoin_date,
-                        'County': 'Lee',
-                        'Source': 'Enjoined List',
-                        'Case Number': case_num,
-                        'Details': condition,
-                        'Type': 'Enjoined'
+                cols = row.find_elements(By.TAG_NAME, "td")
+                if len(cols) >= 2:
+                    data.append({
+                        'Name': cols[0].text,
+                        'Date': cols[1].text,
+                        'County': 'Brevard',
+                        'Source': 'Animal Abuse Database',
+                        'Type': 'Convicted',
+                        'Details': ' | '.join([c.text for c in cols[2:]])
                     })
     except Exception as e:
-        logger.error(f"Lee Enjoined scrape failed: {e}")
-    
-    # Dynamic Registry
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
-    try:
-        driver.get("https://www.sheriffleefl.org/animal-abuser-search/")
-        wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-        table = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
-        rows = driver.find_elements(By.TAG_NAME, 'tr')[1:]
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, 'td')
-            if len(cols) >= 4:
-                name = cols[0].text.strip()
-                dob = cols[1].text.strip()
-                address = cols[2].text.strip()
-                charges = cols[3].text.strip()
-                entry_date = datetime.now().strftime('%Y-%m-%d')
-                all_data.append({
-                    'Name': name,
-                    'Date': entry_date,
-                    'County': 'Lee',
-                    'Source': 'Convicted Registry',
-                    'Case Number': '',
-                    'Details': f"DOB: {dob} | Address: {address} | Charges: {charges}",
-                    'Type': 'Convicted'
-                })
-        time.sleep(2)
-    except Exception as e:
-        logger.error(f"Lee Registry scrape failed: {e}")
-    finally:
-        driver.quit()
-    
-    df = pd.DataFrame(all_data)
-    df = dedupe_df(df)
-    df['Last Updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    return df
+        logger.error(f"Brevard scrape failed: {e}")
+    return pd.DataFrame(data)
 
-def scrape_collier():
-    """Scrape Collier County Animal Abuse Search static table."""
+def scrape_lee():
+    logger.info("Scraping Lee (Enjoined & Registry)...")
     all_data = []
+    
+    # 1. Static Enjoined List
     try:
-        response = requests.get("https://www2.colliersheriff.org/animalabusesearch")
+        response = robust_request("https://www.sheriffleefl.org/animal-abuser-registry-enjoined/")
         soup = BeautifulSoup(response.content, 'html.parser')
         table = soup.find('table')
         if table:
-            rows = table.find_all('tr')[1:]
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 6:
-                    type_ = cols[0].text.strip()
-                    name = cols[1].text.strip()
-                    dob = cols[2].text.strip()
-                    address = cols[3].text.strip()
-                    years = cols[4].text.strip()
-                    expiration = cols[5].text.strip()
-                    charge = cols[6].text.strip() if len(cols) > 6 else ''
-                    reg_date = parse_date(expiration) if expiration != 'N/A' else datetime.now().strftime('%Y-%m-%d')
+            for row in table.find_all('tr')[1:]:
+                cols = [c.get_text(strip=True) for c in row.find_all('td')]
+                if len(cols) >= 3:
                     all_data.append({
-                        'Name': name,
-                        'Date': reg_date,
+                        'Name': cols[0],
+                        'Date': cols[2],
+                        'County': 'Lee',
+                        'Source': 'Enjoined List',
+                        'Type': 'Enjoined',
+                        'Details': f"Case: {cols[1]} | Condition: {cols[3] if len(cols) > 3 else ''}"
+                    })
+    except Exception as e:
+         logger.error(f"Lee Enjoined scrape failed: {e}")
+
+    # 2. Dynamic Registry
+    try:
+        with SeleniumDriver() as driver:
+            driver.get("https://www.sheriffleefl.org/animal-abuser-search/")
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+            rows = driver.find_elements(By.TAG_NAME, 'tr')[1:]
+            for row in rows:
+                cols = [c.text for c in row.find_elements(By.TAG_NAME, 'td')]
+                if len(cols) >= 4:
+                    all_data.append({
+                        'Name': cols[0],
+                        'Date': datetime.now().strftime('%Y-%m-%d'), # Date not explicitly in table, using scrape date
+                        'County': 'Lee',
+                        'Source': 'Convicted Registry',
+                        'Type': 'Convicted',
+                        'Details': f"DOB: {cols[1]} | Address: {cols[2]} | Charges: {cols[3]}"
+                    })
+    except Exception as e:
+        logger.error(f"Lee Registry scrape failed: {e}")
+
+    return pd.DataFrame(all_data)
+
+def scrape_collier():
+    logger.info("Scraping Collier...")
+    data = []
+    try:
+        response = robust_request("https://www2.colliersheriff.org/animalabusesearch")
+        soup = BeautifulSoup(response.content, 'html.parser')
+        table = soup.find('table')
+        if table:
+            for row in table.find_all('tr')[1:]:
+                cols = [c.get_text(strip=True) for c in row.find_all('td')]
+                if len(cols) >= 6:
+                    data.append({
+                        'Name': cols[1],
+                        # Use expiration date as a proxy for 'Date' if it's a date, else today
+                        'Date': cols[5] if cols[5] != 'N/A' else datetime.now().strftime('%Y-%m-%d'),
                         'County': 'Collier',
                         'Source': 'Animal Abuse Search',
-                        'Details': f"Type: {type_} | DOB: {dob} | Address: {address} | Years: {years} | Charge: {charge}",
-                        'Type': type_
+                        'Type': cols[0],
+                        'Details': f"DOB: {cols[2]} | Address: {cols[3]} | Years: {cols[4]} | Charge: {cols[6] if len(cols) > 6 else ''}"
                     })
     except Exception as e:
         logger.error(f"Collier scrape failed: {e}")
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
 def scrape_hillsborough():
-    """Scrape Hillsborough County Registry via Selenium."""
-    all_data = []
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
+    logger.info("Scraping Hillsborough...")
+    data = []
     try:
-        driver.get("https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry")
-        wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-        table = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
-        rows = driver.find_elements(By.TAG_NAME, 'tr')[1:]
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, "td")
-            if len(cols) >= 2:
-                name = cols[0].text.strip()
-                date = cols[1].text.strip() if len(cols) > 1 else datetime.now().strftime('%Y-%m-%d')
-                all_data.append({
-                    'Name': name,
-                    'Date': parse_date(date),
-                    'County': 'Hillsborough',
-                    'Source': 'Animal Abuser Registry',
-                    'Details': ' | '.join([c.text.strip() for c in cols[2:]]),
-                    'Type': 'Convicted'
-                })
-        time.sleep(2)
+        with SeleniumDriver() as driver:
+            driver.get("https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry")
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+            for row in driver.find_elements(By.TAG_NAME, 'tr')[1:]:
+                cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
+                if len(cols) >= 2:
+                     data.append({
+                        'Name': cols[0],
+                        'Date': cols[1],
+                        'County': 'Hillsborough',
+                        'Source': 'Animal Abuser Registry',
+                        'Type': 'Convicted',
+                        'Details': ' | '.join(cols[2:])
+                    })
     except Exception as e:
         logger.error(f"Hillsborough scrape failed: {e}")
-    finally:
-        driver.quit()
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
 def scrape_miami_dade():
-    """Scrape Miami-Dade Registry via Selenium."""
-    all_data = []
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
+    logger.info("Scraping Miami-Dade...")
+    data = []
     try:
-        driver.get("https://www.miamidade.gov/Apps/ASD/crueltyweb/")
-        wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-        rows = driver.find_elements(By.CSS_SELECTOR, ".registry-entry")  # Adjust selector
-        for row in rows:
-            name = row.find_element(By.CSS_SELECTOR, ".name").text.strip()  # Adjust
-            date = row.find_element(By.CSS_SELECTOR, ".date").text.strip()
-            all_data.append({
-                'Name': name,
-                'Date': parse_date(date),
-                'County': 'Miami-Dade',
-                'Source': 'Animal Abuser Registry',
-                'Details': row.text,
-                'Type': 'Convicted'
-            })
+        with SeleniumDriver() as driver:
+            driver.get("https://www.miamidade.gov/Apps/ASD/crueltyweb/")
+            # Wait for at least one registry entry to appear
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".registry-entry")))
+            
+            # Using a more generic approach if specific class names aren't perfectly reliable
+            entries = driver.find_elements(By.CSS_SELECTOR, ".registry-entry")
+            for entry in entries:
+                text = entry.text
+                # Simple parsing based on expected text structure; might need refinement based on actual HTML
+                lines = text.split('\n')
+                if len(lines) >= 1:
+                    # Assuming first line is name, second might be date or other info
+                    data.append({
+                        'Name': lines[0],
+                         # Try to find a date-like string in the text, else use today
+                        'Date': next((line for line in lines if re.search(r'\d{1,2}/\d{1,2}/\d{2,4}', line)), datetime.now().strftime('%Y-%m-%d')),
+                        'County': 'Miami-Dade',
+                        'Source': 'Animal Abuser Registry',
+                        'Type': 'Convicted',
+                        'Details': ' | '.join(lines[1:])
+                    })
     except Exception as e:
         logger.error(f"Miami-Dade scrape failed: {e}")
-    finally:
-        driver.quit()
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
 def scrape_marion():
-    """Scrape Marion County Registry static blocks."""
-    all_data = []
+    logger.info("Scraping Marion...")
+    data = []
     try:
-        response = requests.get("https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry")
+        response = robust_request("https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry")
         soup = BeautifulSoup(response.content, 'html.parser')
-        entries = soup.find_all('div', class_='registry-entry')  # Adjust selector
-        for entry in entries:
-            text = entry.get_text()
-            name_match = re.search(r'Name:\s*(.+?)(?=\n|$)', text)
-            dob_match = re.search(r'Date of Birth:\s*(.+?)(?=\n|$)', text)
-            conviction_match = re.search(r'Conviction Date:\s*(.+?)(?=\n|$)', text)
-            name = name_match.group(1).strip() if name_match else ''
-            date = parse_date(conviction_match.group(1).strip() if conviction_match else datetime.now().strftime('%Y-%m-%d'))
-            details = text.replace(name, '').strip()
-            all_data.append({
-                'Name': name,
-                'Date': date,
-                'County': 'Marion',
-                'Source': 'Animal Abuser Registry',
-                'Details': f"DOB: {dob_match.group(1).strip() if dob_match else 'N/A'} | {details}",
-                'Type': 'Convicted'
-            })
+        # Assuming 'registry-entry' class exists based on original code, might need adjustment
+        for entry in soup.find_all('div', class_='registry-entry'):
+            text = entry.get_text(separator='\n')
+            name_match = re.search(r'Name:\s*(.+)', text)
+            date_match = re.search(r'Conviction Date:\s*(.+)', text)
+            
+            if name_match:
+                 data.append({
+                    'Name': name_match.group(1).strip(),
+                    'Date': date_match.group(1).strip() if date_match else datetime.now().strftime('%Y-%m-%d'),
+                    'County': 'Marion',
+                    'Source': 'Animal Abuser Registry',
+                    'Type': 'Convicted',
+                    'Details': text.replace('\n', ' | ').strip()
+                })
     except Exception as e:
         logger.error(f"Marion scrape failed: {e}")
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
 def scrape_pasco():
-    """Scrape Pasco County Search via Selenium."""
-    all_data = []
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
+    logger.info("Scraping Pasco...")
+    data = []
     try:
-        driver.get("https://www.pascoclerk.com/153/Animal-Abuser-Search")
-        continue_btn = WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.element_to_be_clickable((By.LINK_TEXT, "Continue to Search")))
-        continue_btn.click()
-        time.sleep(3)
-        table = driver.find_element(By.TAG_NAME, 'table')
-        rows = table.find_elements(By.TAG_NAME, 'tr')[1:]
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, 'td')
-            if len(cols) >= 2:
-                name = cols[0].text.strip()
-                date = cols[1].text.strip() if len(cols) > 1 else datetime.now().strftime('%Y-%m-%d')
-                all_data.append({
-                    'Name': name,
-                    'Date': parse_date(date),
-                    'County': 'Pasco',
-                    'Source': 'Animal Abuser Search',
-                    'Details': ' | '.join([c.text.strip() for c in cols[2:]]),
-                    'Type': 'Convicted'
-                })
+        with SeleniumDriver() as driver:
+            driver.get("https://www.pascoclerk.com/153/Animal-Abuser-Search")
+            continue_link = WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.element_to_be_clickable((By.LINK_TEXT, "Continue to Search")))
+            continue_link.click()
+            
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+            # Slight delay for table population
+            time.sleep(2)
+            
+            for row in driver.find_elements(By.CSS_SELECTOR, 'table tr')[1:]:
+                cols = [c.text for c in row.find_elements(By.TAG_NAME, 'td')]
+                if len(cols) >= 2:
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[1],
+                        'County': 'Pasco',
+                        'Source': 'Animal Abuser Search',
+                        'Type': 'Convicted',
+                        'Details': ' | '.join(cols[2:])
+                    })
     except Exception as e:
-        logger.error(f"Pasco scrape failed: {e}")
-    finally:
-        driver.quit()
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+         logger.error(f"Pasco scrape failed: {e}")
+    return pd.DataFrame(data)
 
 def scrape_seminole():
-    """Scrape Seminole County Registry via Selenium."""
-    all_data = []
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=options)
+    logger.info("Scraping Seminole...")
+    data = []
     try:
-        driver.get("https://www.seminolecountyfl.gov/departments-services/prepare-seminole/animal-services/animal-abuse-registry")
-        wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-        table = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
-        rows = driver.find_elements(By.TAG_NAME, 'tr')[1:]
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, 'td')
-            if len(cols) >= 2:
-                name = cols[0].text.strip()
-                date = cols[1].text.strip() if len(cols) > 1 else datetime.now().strftime('%Y-%m-%d')
-                all_data.append({
-                    'Name': name,
-                    'Date': parse_date(date),
-                    'County': 'Seminole',
-                    'Source': 'Animal Abuse Registry',
-                    'Details': ' | '.join([c.text.strip() for c in cols[2:]]),
-                    'Type': 'Convicted'
-                })
-        time.sleep(2)
+        with SeleniumDriver() as driver:
+            driver.get("https://www.seminolecountyfl.gov/departments-services/prepare-seminole/animal-services/animal-abuse-registry")
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+            for row in driver.find_elements(By.CSS_SELECTOR, 'table tr')[1:]:
+                cols = [c.text for c in row.find_elements(By.TAG_NAME, 'td')]
+                if len(cols) >= 2:
+                     data.append({
+                        'Name': cols[0],
+                        'Date': cols[1],
+                        'County': 'Seminole',
+                        'Source': 'Animal Abuse Registry',
+                        'Type': 'Convicted',
+                        'Details': ' | '.join(cols[2:])
+                    })
     except Exception as e:
         logger.error(f"Seminole scrape failed: {e}")
-    finally:
-        driver.quit()
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
 def scrape_volusia():
-    """Scrape Volusia County PDF database."""
-    all_data = []
+    logger.info("Scraping Volusia...")
+    data = []
     pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"
     try:
-        response = requests.get(pdf_url)
+        # stream=True is better for potentially large files
+        response = requests.get(pdf_url, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        # Saving to a temporary file might be more reliable for pdfplumber than raw stream sometimes
+        # but sticking to in-memory for now as it usually works for smaller PDFs
         with pdfplumber.open(response.raw) as pdf:
             for page in pdf.pages:
                 text = page.extract_text()
-                lines = text.split('\n')
-                for line in lines:
-                    if re.match(r'^[A-Z][a-z]+ [A-Z][a-z]+', line):  # Name pattern
-                        parts = line.split(',')  # Assume Name, Date, etc.
+                if not text: continue
+                for line in text.split('\n'):
+                    # Basic heuristic: assume lines starting with a name-like pattern are entries
+                    if re.match(r'^[A-Z][a-z]+,?\s+[A-Z]', line):
+                        parts = [p.strip() for p in re.split(r'\s{2,}|,', line) if p.strip()]
                         if len(parts) >= 2:
-                            name = parts[0].strip()
-                            date = parse_date(parts[1].strip())
-                            all_data.append({
-                                'Name': name,
-                                'Date': date,
+                             data.append({
+                                'Name': parts[0],
+                                # Try to find a date in the remaining parts
+                                'Date': next((p for p in parts[1:] if re.search(r'\d{1,2}/\d{1,2}/\d{2,4}', p)), 'Unknown'),
                                 'County': 'Volusia',
-                                'Source': 'Animal Abuse Database PDF',
-                                'Details': ' | '.join([p.strip() for p in parts[2:]]),
-                                'Type': 'Convicted'
+                                'Source': 'PDF Database',
+                                'Type': 'Convicted',
+                                'Details': ' | '.join(parts[1:])
                             })
     except Exception as e:
         logger.error(f"Volusia scrape failed: {e}")
-    df = pd.DataFrame(all_data)
-    return dedupe_df(df)
+    return pd.DataFrame(data)
 
-def scrape_pinellas():
-    """Stub: No public registry for Pinellas."""
-    logger.info("Pinellas stub - no public registry; use clerk site manually.")
+# --- Stubs for counties without public automated registries ---
+def scrape_stub(county_name, message):
+    logger.info(f"Skipping {county_name}: {message}")
     return pd.DataFrame()
 
-def scrape_broward():
-    """Stub: No public registry for Broward."""
-    logger.info("Broward stub - internal DNA list only; manual clerk search.")
-    return pd.DataFrame()
 
-def scrape_orange():
-    """Stub: No public registry for Orange."""
-    logger.info("Orange stub - no live list; manual clerk hunts.")
-    return pd.DataFrame()
-
-def scrape_nassau():
-    """Stub: No public registry for Nassau."""
-    logger.info("Nassau stub - monitor FS 828.27 updates.")
-    return pd.DataFrame()
-
-def scrape_monroe():
-    """Stub: No public registry for Monroe."""
-    logger.info("Monroe stub - no abuser list; check sheriff periodically.")
-    return pd.DataFrame()
-
-def scrape_escambia():
-    """Stub: No public registry for Escambia."""
-    logger.info("Escambia stub - no dedicated list; await statewide registry Jan 2026.")
-    return pd.DataFrame()
-
-def scrape_palm_beach():
-    """Stub: No public registry for Palm Beach."""
-    logger.info("Palm Beach stub - internal 'do not adopt' list; manual checks via Animal Care.")
-    return pd.DataFrame()
-
-def scrape_all_sources():
-    """Combine all county scrapes, dedupe globally."""
-    dfs = [
-        scrape_brevard(),
-        scrape_lee_enjoined_and_registry(),
-        scrape_collier(),
-        scrape_hillsborough(),
-        scrape_miami_dade(),
-        scrape_marion(),
-        scrape_pasco(),
-        scrape_seminole(),
-        scrape_volusia(),
-        scrape_pinellas(),
-        scrape_broward(),
-        scrape_orange(),
-        scrape_nassau(),
-        scrape_monroe(),
-        scrape_escambia(),
-        scrape_palm_beach(),
-        # Add more as needed
-    ]
-    combined = pd.concat(dfs, ignore_index=True)
-    combined = dedupe_df(combined)
-    combined['Last Updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    logger.info(f"Combined {len(combined)} unique entries.")
-    return combined
+# --- Main Orchestration ---
 
 def main():
-    """Scrape all, upload to Sheet, export CSV."""
+    start_time = time.time()
+    logger.info(f"Starting DNAFL scraper job at {datetime.utcnow().isoformat()} UTC")
     if DRY_RUN:
-        logger.info("DRY RUN: Scraping without writes.")
-    
+        logger.warning("--- DRY RUN MODE: No data will be uploaded to Google Sheets ---")
+
+    # Authenticate once at the start
     try:
-        client = auth_gspread()
-        df = scrape_all_sources()
-        append_to_sheet(df, 'DNAFL_Master', client)
-        df.to_csv('dnafl_latest.csv', index=False)
-        logger.info("Scrape done—fresh data ready.")
+        gspread_client = get_gspread_client()
     except Exception as e:
-        logger.error(f"Execution failed: {e}")
-        raise
+        logger.critical(f"Authentication failed: {e}")
+        sys.exit(1)
+
+    # List of all scraper functions to run
+    scrapers = [
+        scrape_brevard,
+        scrape_lee,
+        scrape_collier,
+        scrape_hillsborough,
+        scrape_miami_dade,
+        scrape_marion,
+        scrape_pasco,
+        scrape_seminole,
+        scrape_volusia,
+        # Stubs
+        lambda: scrape_stub('Pinellas', 'No public registry'),
+        lambda: scrape_stub('Broward', 'Internal list only'),
+        lambda: scrape_stub('Orange', 'Manual checks required'),
+        # ... add other stubs as needed
+    ]
+
+    results = []
+    # Run scrapers concurrently to save time
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Map future to scraper name for logging
+        future_to_name = {executor.submit(s): s.__name__ if hasattr(s, '__name__') else 'Anonymous Lambda' for s in scrapers}
+        
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                df = future.result()
+                if not df.empty:
+                    results.append(df)
+                    logger.info(f"[{name}] Found {len(df)} records.")
+                else:
+                     logger.info(f"[{name}] No records found.")
+            except Exception as e:
+                logger.error(f"[{name}] crashed: {e}", exc_info=True)
+
+    if results:
+        # Combine all individual county dataframes into one master list
+        master_df = pd.concat(results, ignore_index=True)
+        master_df = clean_df(master_df)
+        
+        logger.info(f"Total unique records after cleanup: {len(master_df)}")
+        
+        # Upload Master List to Google Sheet
+        append_to_sheet(master_df, 'DNAFL_Master', gspread_client)
+        
+        # Optional: Save a local CSV backup (useful for debugging or CI artifacts)
+        csv_filename = f'dnafl_backup_{datetime.now().strftime("%Y%m%d")}.csv'
+        master_df.to_csv(csv_filename, index=False)
+        logger.info(f"Local backup saved to {csv_filename}")
+
+    else:
+        logger.error("All scrapers failed to return data. Nothing to upload.")
+        if not DRY_RUN:
+             sys.exit(1) # Exit with error in CI if totally failed
+
+    elapsed = time.time() - start_time
+    logger.info(f"Job finished successfully in {elapsed:.2f} seconds.")
 
 if __name__ == "__main__":
     main()
