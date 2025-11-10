@@ -1,6 +1,7 @@
 # DNA Florida List Dashboard
 
-[![GitHub Pages Deploy](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml)  
+![GitHub Pages Deploy](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml/badge.svg)
+![CI](https://github.com/EliteGreyIT67/DNAFL-app/workflows/CI/CD/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A dynamic, self-contained web dashboard for exploring DNA Florida lists, sourced live from Google Sheets. Features intuitive tabs for "DNA List" and "BCAC DNA List", with powerful search, filtering, sorting, pagination, and CSV export capabilities. Built with vanilla HTML/JS, Tailwind CSS for styling, and optimized for mobile/dark mode. Automated CI/CD via GitHub Actions ensures code quality and effortless deployment to GitHub Pages.
