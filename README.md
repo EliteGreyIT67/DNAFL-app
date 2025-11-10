@@ -1,92 +1,135 @@
-# DNA Florida List Dashboard
+# DNAFL-app: Florida Do Not Adopt (DNA) Lists Dashboard
 
-![GitHub Pages Deploy](https://github.com/EliteGreylT67/DNAFL-app/actions/workflows/ci-cd.yml/badge.svg)
-![CI](https://github.com/EliteGreyIT67/DNAFL-app/workflows/CI/CD/badge.svg)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI/CD](https://github.com/EliteGreyIT67/DNAFL-app/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/EliteGreyIT67/DNAFL-app/actions/workflows/ci-cd.yml) [![Scrape Schedule](https://github.com/EliteGreyIT67/DNAFL-app/actions/workflows/scrape.yml/badge.svg)](https://github.com/EliteGreyIT67/DNAFL-app/actions/workflows/scrape.yml)
 
-A dynamic, self-contained web dashboard for exploring DNA Florida lists, sourced live from Google Sheets. Features intuitive tabs for "DNA List" and "BCAC DNA List", with powerful search, filtering, sorting, pagination, and CSV export capabilities. Built with vanilla HTML/JS, Tailwind CSS for styling, and optimized for mobile/dark mode. Automated CI/CD via GitHub Actions ensures code quality and effortless deployment to GitHub Pages.
+A lightweight, client-side web dashboard for exploring and managing Florida animal abuser registries and enjoined lists (under Florida Statute 828.27). Pulls live data from public Google Sheets (aggregated via automated scraping) for real-time viewing, filtering, and exporting. No backend required—runs entirely in the browser.
 
-**Live Demo**: [https://EliteGreylT67.github.io/DNAFL-app/](https://EliteGreylT67.github.io/DNAFL-app/)
+**Live Demo**: [https://elitedgreyit67.github.io/DNAFL-app/](https://elitedgreyit67.github.io/DNAFL-app/)
 
-![Dashboard Screenshot](assets/screenshot-dashboard-light.png)  
-Screenshot: DNA List tab in light mode (add your own image to assets/ for visuals).
+## Table of Contents
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Installation & Setup](#installation--setup)
+- [Usage](#usage)
+- [Automation & Deployment](#automation--deployment)
+- [Contributing](#contributing)
+- [License](#license)
+- [Roadmap](#roadmap)
 
 ## Features
-- **Tabbed Interface**: Seamless switching between "DNA List" (with columns: Name, County, Date, Details, Link) and "BCAC DNA List".
-- **Live Data Fetching**: Pulls real-time CSV exports from a public Google Sheets document—no local files required.
-- **Search & Advanced Filters**: Global keyword search, county selector (auto-populated), date range picker, and reset button.
-- **Sorting & Pagination**: Column-header sorting (date-aware), with 50 rows/page and Prev/Next navigation.
-- **Export Functionality**: Download filtered/sorted data as CSV with a single click.
-- **UI/UX Enhancements**: Dark mode toggle (persisted in localStorage), responsive design (mobile scrolling), sticky table headers, and accessible ARIA attributes.
-- **Robust Data Handling**: Multiline CSV parsing, graceful invalid date management (logs warnings but includes rows), and error handling for fetches.
-- **Automation**: GitHub Actions workflow for linting (ESLint, htmlhint), syntax checks, and auto-deployment to Pages.
+- **Multi-Tab Interface**: Switch between aggregated DNA lists (e.g., main DNA List, BCAC) and county-specific registries (e.g., Lee Enjoined, Collier, Hillsborough, Volusia, Marion, Brevard, Miami-Dade, Seminole, Pasco).
+- **Interactive Filtering**:
+  - Global keyword search across all columns.
+  - County selector (auto-populates from data).
+  - Date range picker (handles formats like YYYY-MM-DD, MM-YY).
+  - Column sorting (Name A-Z, Date newest/oldest).
+- **Pagination & Export**: 50 rows/page; export filtered/sorted results as CSV.
+- **UX Enhancements**: Dark mode (persists via localStorage), responsive design (mobile/desktop), sticky headers, ARIA labels for accessibility.
+- **Data Handling**: Real-time CSV fetches from Google Sheets; multiline support, invalid date warnings, error handling.
+- **Automation**: Python scraper updates sheets daily via GitHub Actions; CI/CD for linting/testing/deploys.
 
-## Prerequisites
-- Modern browser (Chrome, Firefox, etc.).
-- Google Sheets document shared publicly ("Anyone with the link can view") for data access. Default: [Provided Sheets](https://docs.google.com/spreadsheets/d/1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY/edit?usp=sharing).
-
-## Installation/Setup
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/EliteGreylT67/DNAFL-app.git
+## Quick Start
+1. **Run Locally**:
+   ```
+   git clone https://github.com/EliteGreyIT67/DNAFL-app.git
    cd DNAFL-app
+   python -m http.server 8000  # Or open index.html in browser
+   ```
+   Visit `http://localhost:8000`.
+
+2. **View Demo**: Click the live link above—tabs load county data on switch.
+
+3. **Customize Data**: Edit `SHEET_ID` in `index.html` or `scraper.py` for your Google Sheet.
+
+## Installation & Setup
+### For the Web App
+- **Dependencies**: None—uses vanilla HTML/JS + Tailwind CSS (CDN).
+- **Data Source**: Public Google Sheet (ID: `1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY`). Sheets like "DNA List", "Lee Enjoined" auto-generate tabs.
+- **Local Dev**: Serve via any static server (Python, VS Code Live Server). Edit `tables` object in `<script>` to add/remove tabs.
+
+### For the Scraper (Automation)
+1. **Python 3.10+**:
+   ```
+   pip install -r requirements.txt  # gspread, pandas, selenium, etc.
    ```
 
-2. **Customize Data Source (Optional)**:
-   - Edit `index.html` (in the `<script>` section) to update `tables.dna.url` and `tables.bcac.url` if using a different Sheets ID or sheet names.
-   - Example: `https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/gviz/tq?tqx=out:csv&sheet=DNA%20List`
+2. **Google Sheets API**:
+   - [Google Cloud Console](https://console.cloud.google.com/): Enable Sheets/Drive APIs.
+   - Create service account → Download `credentials.json`.
+   - Share your master sheet (Editor access) with the service account email.
 
-3. **Local Development**:
-   - Serve locally: Use `python -m http.server` (Python 3+) or a tool like VS Code's Live Server.
-   - Open `http://localhost:8000/` in your browser to test.
+3. **Chrome (for Selenium)**: Install Google Chrome (headless mode used).
 
-4. **Deployment**:
-   - The `.github/workflows/ci-cd.yml` automates deployment to GitHub Pages on pushes to `main`.
-   - Enable Pages in repo Settings > Pages > Source: GitHub Actions.
-   - Access at `https://EliteGreylT67.github.io/DNAFL-app/`.
+4. **Run**:
+   ```
+   python scraper.py  # Updates sheets
+   python scraper.py --dry-run  # Test without writes
+   ```
+
+**requirements.txt**:
+```
+gspread
+oauth2client
+requests
+pandas
+pdfplumber
+beautifulsoup4
+selenium
+webdriver-manager
+```
 
 ## Usage
-1. **Open the Dashboard**: Load `index.html` locally or via the deployed URL.
-2. **Navigate Tabs**: Click "DNA List" or "BCAC DNA List" to switch views.
-3. **Search Data**: Enter keywords in the search bar for instant results across all columns.
-4. **Apply Filters**: 
-   - Select a county from the dropdown (auto-fills from data).
-   - Pick date ranges using the calendar inputs.
-   - Hit "Reset Filters" to clear all.
-5. **Sort Columns**: Click headers to toggle ascending/descending (dates sort chronologically).
-6. **Paginate**: Use Prev/Next to browse pages; info shows current range.
-7. **Export**: Click "Export Filtered CSV" for a downloadable file of visible data.
-8. **Toggle Dark Mode**: Click the moon/sun icon—theme persists across sessions.
+### Web Dashboard
+- **Tabs**: Click to load (e.g., "Collier Registry" shows scraped entries).
+- **Filters**:
+  - Search: Type keywords (searches Name, County, Details).
+  - County: Dropdown from unique values.
+  - Date: Pick range (e.g., 2024-01-01 to 2025-11-09).
+  - Sort: Name ascending or Date newest.
+- **Export**: Click "📊 Export CSV" for filtered data (filename: `DNAFL-[tab]-[date].csv`).
+- **Mobile**: Responsive—scroll horizontally for tables.
 
-If loading fails, check browser console (e.g., Sheets not public? Update sharing via File > Share in Google Sheets).
+### Scraper
+- Fetches from 15+ sources (PDFs, HTML tables, dynamic searches via Selenium).
+- Outputs to county-specific sheets (e.g., "Hillsborough Enjoined").
+- Dedupes by Name + Date; logs additions.
 
-## Troubleshooting
-- **Data Not Loading**: Ensure Sheets is public; test URLs directly in browser (should download CSV). Console warns on invalid dates/mismatches.
-- **Actions Failures**: Check workflow logs in GitHub Actions tab. Common: YAML syntax—use `act` CLI locally for sims (`brew install act` on macOS).
-- **Performance**: For large datasets (>10k rows), filtering/sorting is client-side; consider server-side if scaling.
-- **Browser Issues**: Test in incognito for localStorage conflicts.
+Example Output (Collier):
+| Name              | County | Date       | Details                          | Link |
+|-------------------|--------|------------|----------------------------------|------|
+| MCCORD DEREK     | Collier| 2024-11-08| Charge: ANIMAL ABUSE (828.12-2) | N/A |
 
-## Roadmap
-- Add charting (e.g., county distribution via Chart.js).
-- Support authenticated Sheets access (e.g., via API keys).
-- Expand Actions: Add scheduled Sheets backups or PR auto-reviews.
-- Contributions: Suggest features via issues!
+## Automation & Deployment
+### GitHub Actions
+- **CI/CD (App)**: Lints `index.html` (ESLint, htmlhint), tests fetches, deploys to Pages on main push.
+- **Scraper Schedule**: Runs daily (2 AM UTC); lints `scraper.py`, updates sheets, commits changes.
+- **Full CI**: Tests both app & scraper on PRs/pushes.
+- **Manual Trigger**: Actions tab → Run workflow.
+
+View runs: [GitHub Actions](https://github.com/EliteGreyIT67/DNAFL-app/actions).
+
+### Deployment
+- **GitHub Pages**: Auto-deploys from `main` to `gh-pages` (or `main` branch).
+- **Custom**: Host on Vercel/Netlify (static site).
 
 ## Contributing
-We welcome contributions! Follow these steps:
-1. Fork the repo and create a feature branch (`git checkout -b feature/awesome-addition`).
-2. Commit changes (`git commit -am 'Add awesome feature'`).
-3. Push to the branch (`git push origin feature/awesome-addition`).
-4. Open a Pull Request—Actions will auto-lint/test.
+1. Fork → Branch (e.g., `feature/new-county`).
+2. Lint locally:
+   - App: `eslint index.html && htmlhint index.html`
+   - Scraper: `pip install flake8 && flake8 scraper.py`
+3. Test: Run app/scraper; check sheets.
+4. PR to `main`: Describe changes (e.g., "Add Pasco scraper").
 
-For code reviews: Run local lints with `npm install --save-dev eslint htmlhint`, then `npx eslint index.html` and `npx htmlhint index.html`. Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) (add if needed).
+Issues/PRs welcome! Assisted by xAI's Grok.
 
 ## License
-This project is licensed under the MIT License—see the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE).
 
-## Acknowledgments
-- **Tech Stack**: Tailwind CSS for styling, vanilla JS for logic, Google Sheets for data.
-- **Built By**: xAI's Grok—code development, debugging, reviews, and Actions automation in one.
-- **Data Ethics**: Use responsibly; ensure Sheets compliance with privacy laws.
+## Roadmap
+- Charts: Visualize enjoinments by county/date (Chart.js).
+- Auth: Private Sheets access.
+- Backups: Auto-export sheets to repo.
+- More Counties: Escambia, Orange, etc.
+- Fuzzy Search: For name variations.
 
-Questions or ideas? Open an issue—let's build and automate together!
+Questions? Open an issue or ping @EliteGreyIT67. Thanks for using DNAFL-app—protecting animals, one list at a time! 🐾
