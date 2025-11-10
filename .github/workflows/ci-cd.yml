@@ -1,49 +1,36 @@
-name: CI/CD for DNAFL-app
+name: Deploy to Pages
 
 on:
   push:
     branches: [ main ]
-    paths: [ 'index.html', 'assets/**' ]  # Only app files
-  pull_request:
-    branches: [ main ]
-    paths: [ 'index.html', 'assets/**' ]
+    paths: [ 'index.html' ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Node.js (for ESLint)
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-
-    - name: Install ESLint & HTML Plugin
-      run: |
-        npm install eslint eslint-plugin-html htmlhint  # Local install for CI
-
-    - name: Lint HTML/JS
-      run: |
-        eslint --plugin html --max-warnings=10 index.html  # Lints inline JS in <script>; allow warnings
-        htmlhint index.html  # HTML validation
-
-    - name: Test (basic smoke test)
-      run: |
-        # Simple test: Fetch a sheet URL (use curl for no JS)
-        curl -f "https://docs.google.com/spreadsheets/d/1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY/gviz/tq?tqx=out:csv&sheet=DNA%20List" || exit 1
-        echo "App lint & basic test passed!"
-
   deploy:
-    needs: lint-and-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: .  # Deploy current dir (index.html + assets)
-        publish_branch: gh-pages  # Or 'main' if using main for Pages
+
