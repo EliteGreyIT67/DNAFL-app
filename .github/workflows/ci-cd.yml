@@ -24,7 +24,7 @@ jobs:
 
     - name: Lint HTML/JS
       run: |
-        eslint index.html  # Lints inline JS
+        eslint --max-warnings=10 index.html  # Lints inline JS
         htmlhint index.html  # HTML validation
 
     - name: Test (basic smoke test)
