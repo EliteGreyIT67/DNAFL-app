@@ -324,10 +324,11 @@ def scrape_marion():
 
 def scrape_hillsborough():
     data = []
-    # 1. Enjoined PDF (Improved with structured table extraction)
+    
+    # 1. Enjoined PDF (Retaining robust table extraction)
     pdf_url = "https://assets.contentstack.io/v3/assets/blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
     try:
-        # Use existing fetch_url helper for robust retries/timeouts
+        # Use existing fetch_url helper
         resp = fetch_url(pdf_url, stream=True, verify=False)
         
         with pdfplumber.open(resp.raw) as pdf:
@@ -336,27 +337,23 @@ def scrape_hillsborough():
                 for table in tables:
                     if not table or len(table) < 2: continue
                     
-                    # Normalize headers
                     headers = [str(h).strip() for h in table[0]]
-                    
                     for row in table[1:]:
                         # Map row to headers safely
-                        row_data = dict(zip(headers, [str(cell).strip() if cell else '' for cell in row]))
+                        row_data = dict(zip(headers, [str(cell).strip() if cell else '' for cell in row] + [''] * (len(headers) - len(row))))
                         
-                        # Ensure essential name fields exist before processing
                         if 'Last Name' in row_data and 'First Name' in row_data:
-                            name = f"{row_data.get('Last Name', '')} {row_data.get('First Name', '')}".strip()
-                            # Skip empty rows that might have been misread
-                            if not name: continue
+                            last = row_data.get('Last Name', '').strip()
+                            first = row_data.get('First Name', '').strip()
+                            name = f"{last} {first}".strip()
+                            
+                            # Skip empty/header rows
+                            if not name or 'Last Name' in name: continue
 
-                            # Compile details from extra columns
                             details_parts = []
-                            if row_data.get('Case Number'): 
-                                details_parts.append(f"Case: {row_data['Case Number']}")
-                            if row_data.get('End Date'): 
-                                details_parts.append(f"End: {row_data['End Date']}")
-                            if row_data.get('Special Restrictions'): 
-                                details_parts.append(f"Restrictions: {row_data['Special Restrictions']}")
+                            if row_data.get('Case Number'): details_parts.append(f"Case: {row_data['Case Number']}")
+                            if row_data.get('End Date'): details_parts.append(f"End: {row_data['End Date']}")
+                            if row_data.get('Special Restrictions'): details_parts.append(f"Restrictions: {row_data['Special Restrictions']}")
 
                             data.append({
                                 'Name': name,
@@ -368,26 +365,79 @@ def scrape_hillsborough():
                             })
                             
     except Exception as e: 
-        alert_failure(f"Hillsborough PDF improved scraper failed: {str(e)[:200]}")
+        alert_failure(f"Hillsborough PDF scraper failed: {str(e)[:200]}")
 
-    # 2. General Registry (Selenium fallback for dynamic search)
+    # 2. General Registry (Selenium with new pagination logic)
     try:
         with SeleniumDriver() as driver:
             driver.get("https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry/search-the-registry")
-            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-            for row in driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]:
-                cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
-                if len(cols) >= 2:
-                    data.append({
-                        'Name': cols[0], 
-                        'Date': cols[1], 
-                        'County': 'Hillsborough', 
-                        'Source': 'Hillsborough Registry', 
-                        'Type': 'Convicted', 
-                        'Details': ' | '.join(cols[2:])
-                    })
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            # Wait for initial table load
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+            
+            page_num = 1
+            while True:
+                # Extract rows from current page
+                rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:] # Skip header
+                if not rows:
+                    logger.warning(f"Hillsborough Search: No rows found on page {page_num}.")
+                    break
+
+                for row in rows:
+                    cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
+                    
+                    # New script expects 4 cols: Name, DOB, Address, Charges
+                    if len(cols) >= 4:
+                        name = cols[0]
+                        dob = cols[1]
+                        address = cols[2]
+                        charges = cols[3]
+                        
+                        # Get image URL, don't download
+                        img_url_str = ''
+                        try:
+                            img_elem = row.find_element(By.TAG_NAME, "img")
+                            src = img_elem.get_attribute('src')
+                            if src:
+                                if src.startswith('/'): src = 'https://hcfl.gov' + src
+                                img_url_str = f" | Image: {src}"
+                        except Exception:
+                            pass # No image
+                        
+                        data.append({
+                            'Name': name,
+                            'Date': 'Unknown', # Table provides DOB, not conviction date
+                            'County': 'Hillsborough', 
+                            'Source': 'Hillsborough Registry', 
+                            'Type': 'Convicted', 
+                            'Details': f"DOB: {dob} | Address: {address} | Charges: {charges}{img_url_str}"
+                        })
+
+                logger.info(f"Hillsborough Search: Scraped page {page_num}.")
+                
+                # Pagination logic
+                try:
+                    next_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(),'Next') or contains(text(),'>')]")))
+                    if 'disabled' in next_btn.get_attribute('class') or not next_btn.is_enabled():
+                        logger.info("Hillsborough Search: Next button disabled, ending.")
+                        break # Last page
+                    
+                    driver.execute_script("arguments[0].scrollIntoView(true);", next_btn)
+                    time.sleep(1) 
+                    next_btn.click()
+                    page_num += 1
+                    
+                    # Wait for the page to reload
+                    wait.until(EC.staleness_of(rows[0]))
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tr")))
+                    
+                except (TimeoutException, NoSuchElementException):
+                    logger.info("Hillsborough Search: No next button found, ending.")
+                    break # No "Next" button
+        
     except Exception as e: 
-        alert_failure(f"Hillsborough Search failed: {str(e)[:200]}")
+        alert_failure(f"Hillsborough Search (Selenium) failed: {str(e)[:200]}")
         
     return pd.DataFrame(data)
 
