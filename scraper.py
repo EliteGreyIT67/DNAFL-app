@@ -224,22 +224,102 @@ def scrape_lee():
 
 def scrape_marion():
     data = []
-    urls = [
-        ("https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry", "Convicted"),
-        ("https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/civil-enjoinment-list", "Enjoined")
-    ]
-    for url, rtype in urls:
-        try:
-            resp = fetch_url(url)
-            soup = BeautifulSoup(resp.content, 'html.parser')
-            # Marion uses unstructured text mostly
-            for entry in soup.find_all(['p', 'li'], string=re.compile(r'Name:', re.I)):
-                text = entry.get_text(separator=' | ').strip()
-                name = re.search(r'Name:\s*([^|]+)', text, re.I)
-                date = re.search(r'(Conviction|Enjoinment) Date:\s*([^|]+)', text, re.I)
-                if name:
-                     data.append({'Name': name.group(1).strip(), 'Date': date.group(2).strip() if date else 'Unknown', 'County': 'Marion', 'Source': f"Marion {rtype}", 'Type': rtype, 'Details': text})
-        except Exception as e: alert_failure(f"Marion {rtype} failed: {str(e)[:200]}")
+    
+    # --- 1. Static Abuser Registry (Convicted) ---
+    registry_url = "https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry"
+    try:
+        resp = fetch_url(registry_url)
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Find all relevant entries (paragraphs or list items)
+        entries = soup.find_all(['p', 'li'], string=re.compile(r'Name:', re.I))
+        
+        for entry in entries:
+            text = entry.get_text(separator=' | ').strip()
+            name_match = re.search(r'Name:\s*([^|]+)', text, re.I)
+            date_match = re.search(r'(Conviction) Date:\s*([^|]+)', text, re.I)
+            
+            if name_match:
+                name = name_match.group(1).strip()
+                date = date_match.group(2).strip() if date_match else 'Unknown'
+                
+                # --- Try to find an associated image ---
+                img_url = ''
+                try:
+                    # Look for an image tag within or very near the entry
+                    # This searches for an <img> tag that is a child of the entry
+                    img_tag = entry.find('img')
+                    
+                    # If not a child, try finding an img tag with alt text matching the name
+                    if not img_tag:
+                        # Use a regex that is not too strict (e.g., matches first part of name + "mugshot")
+                        img_tag = soup.find('img', alt=re.compile(re.escape(name.split()[0]) + r'.*mugshot', re.I))
+
+                    if img_tag and img_tag.get('src'):
+                        src = img_tag['src']
+                        if src.startswith('/'):
+                            img_url = 'https://animalservices.marionfl.org' + src
+                        elif src.startswith('http'):
+                            img_url = src
+                except Exception:
+                    pass # Ignore image search failures
+
+                details_text = text
+                if img_url:
+                    details_text += f" | Image: {img_url}"
+                
+                data.append({
+                    'Name': name,
+                    'Date': date,
+                    'County': 'Marion',
+                    'Source': 'Marion Registry',
+                    'Type': 'Convicted',
+                    'Details': details_text
+                })
+    except Exception as e:
+        alert_failure(f"Marion Registry (Static) failed: {str(e)[:200]}")
+
+    # --- 2. Dynamic Enjoinment List (Requires Selenium) ---
+    enjoined_url = "https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/civil-enjoinment-list"
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(enjoined_url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+            
+            # Click the "Query" button to load the table
+            query_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Query'] | //button[contains(text(),'Query')]")))
+            driver.execute_script("arguments[0].scrollIntoView();", query_button)
+            query_button.click()
+            
+            # Wait for results table
+            table = wait.until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+            
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:] # Skip header
+            for row in rows:
+                cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
+                
+                # Map columns: 0=Name, 1=Address, 2=Enjoinment_Date, 3=Case_Number
+                if len(cols) >= 4:
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[2] if cols[2] else 'Unknown',
+                        'County': 'Marion',
+                        'Source': 'Marion Enjoined',
+                        'Type': 'Enjoined',
+                        'Details': f"Address: {cols[1]} | Case: {cols[3]}"
+                    })
+                elif len(cols) >= 2: # Fallback for partial rows
+                     data.append({
+                        'Name': cols[0],
+                        'Date': 'Unknown',
+                        'County': 'Marion',
+                        'Source': 'Marion Enjoined',
+                        'Type': 'Enjoined',
+                        'Details': f"Address: {cols[1]}"
+                    })
+    except Exception as e:
+        alert_failure(f"Marion Enjoined (Selenium) failed: {str(e)[:200]}")
+
     return pd.DataFrame(data)
 
 def scrape_hillsborough():
