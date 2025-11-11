@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.3 (Targeted Sources)
-Aggregates Florida animal abuser registries using specific user-provided endpoints.
+DNAFL Scraper v3.4 (Targeted Sources & Lint-Fixed)
+Aggregates Florida animal abuser registries using specific user-provided
+endpoints.
 """
 
 import os
@@ -25,15 +26,19 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # Try importing tenacity for retries
 try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    from tenacity import (
+        retry, stop_after_attempt, wait_exponential,
+        retry_if_exception_type
+    )
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
-    def retry(*args, **kwargs): return lambda f: f
+    def retry(*args, **kwargs):
+        return lambda f: f
     stop_after_attempt = wait_exponential = retry_if_exception_type = None
 
 # --- CONFIGURATION ---
@@ -41,14 +46,18 @@ SHEET_ID = os.getenv('SHEET_ID', '1V0ERkUXzc2G_SvSVUaVac50KyNOpw4N7bL6yAiZospY')
 MASTER_TAB_NAME = "Master_Registry"
 CREDENTIALS_FILE = 'credentials.json'
 GOOGLE_CREDENTIALS_ENV = os.getenv('GOOGLE_CREDENTIALS')
-WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL') 
+WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL')
 
 SELENIUM_TIMEOUT = 30
 MAX_WORKERS = 3
 DRY_RUN = '--dry-run' in sys.argv
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(threadName)s: %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(threadName)s: %(message)s'
+)
 logger = logging.getLogger('DNAFL_Scraper')
+
 
 # --- CORE UTILITIES ---
 
@@ -61,32 +70,57 @@ class SeleniumDriver:
         opts.add_argument('--disable-dev-shm-usage')
         opts.add_argument('--log-level=3')
         opts.add_argument("--window-size=1920,1080")
-        opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+        opts.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 "
+            "Safari/537.36"
+        )
         self.driver = webdriver.Chrome(options=opts)
         # Set strict page load timeout to fail fast on hung pages
         self.driver.set_page_load_timeout(60)
         return self.driver
+
     def __exit__(self, *_):
-        if hasattr(self, 'driver'): self.driver.quit()
+        if hasattr(self, 'driver'):
+            self.driver.quit()
+
 
 def alert_failure(message):
     logger.error(message)
     if WEBHOOK_URL and not DRY_RUN:
-        try: requests.post(WEBHOOK_URL, json={'text': f"🚨 **DNAFL Scraper Alert** 🚨\n{message}"}, timeout=5)
-        except Exception: pass
+        try:
+            requests.post(
+                WEBHOOK_URL,
+                json={'text': f"🚨 **DNAFL Scraper Alert** 🚨\n{message}"},
+                timeout=5
+            )
+        except Exception:
+            pass
+
 
 def get_gspread_client():
-    scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    if GOOGLE_CREDENTIALS_ENV: creds = Credentials.from_service_account_info(json.loads(GOOGLE_CREDENTIALS_ENV), scopes=scopes)
-    elif os.path.exists(CREDENTIALS_FILE): creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
-    else: return None
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    if GOOGLE_CREDENTIALS_ENV:
+        creds_json = json.loads(GOOGLE_CREDENTIALS_ENV)
+        creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
+    elif os.path.exists(CREDENTIALS_FILE):
+        creds = Credentials.from_service_account_file(
+            CREDENTIALS_FILE, scopes=scopes
+        )
+    else:
+        return None
     return gspread.authorize(creds)
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def fetch_url(url, stream=False, verify=True):
     resp = requests.get(url, timeout=45, stream=stream, verify=verify)
     resp.raise_for_status()
     return resp
+
 
 def extract_text_from_pdf(url):
     """Helper to robustly extract all text from a PDF URL."""
@@ -102,32 +136,48 @@ def extract_text_from_pdf(url):
         logger.warning(f"PDF extraction warning for {url}: {e}")
     return text_content
 
+
 def standardize_data(df):
-    if df.empty: return df
+    if df.empty:
+        return df
     for col in ['Name', 'Date', 'County', 'Source', 'Details', 'Type']:
-        if col not in df.columns: df[col] = 'N/A'
-    
+        if col not in df.columns:
+            df[col] = 'N/A'
+
     # Clean strings
     for col in df.columns:
-        if df[col].dtype == 'object': 
-            df[col] = df[col].fillna('N/A').astype(str).str.strip().str.replace(r'\s+', ' ', regex=True)
+        if df[col].dtype == 'object':
+            df[col] = df[col].fillna('N/A').astype(str).str.strip().str.replace(
+                r'\s+', ' ', regex=True
+            )
 
     # Robust Date Parsing
-    df['Date_Parsed'] = pd.to_datetime(df['Date'], format='%m/%d/%Y', errors='coerce')
-    df['Date_Parsed'] = df['Date_Parsed'].fillna(pd.to_datetime(df['Date'], format='%Y-%m-%d', errors='coerce'))
-    df['Date_Parsed'] = df['Date_Parsed'].fillna(pd.to_datetime(df['Date'], errors='coerce'))
+    df['Date_Parsed'] = pd.to_datetime(
+        df['Date'], format='%m/%d/%Y', errors='coerce'
+    )
+    df['Date_Parsed'] = df['Date_Parsed'].fillna(
+        pd.to_datetime(df['Date'], format='%Y-%m-%d', errors='coerce')
+    )
+    df['Date_Parsed'] = df['Date_Parsed'].fillna(
+        pd.to_datetime(df['Date'], errors='coerce')
+    )
     df['Date'] = df['Date_Parsed'].dt.strftime('%Y-%m-%d').fillna('Unknown')
-    
-    return df.drop(columns=['Date_Parsed']).sort_values('Date', ascending=False).drop_duplicates(subset=['Name', 'County', 'Date'])
+
+    return df.drop(columns=['Date_Parsed']).sort_values(
+        'Date', ascending=False
+    ).drop_duplicates(subset=['Name', 'County', 'Date'])
+
 
 # --- SCRAPERS ---
 
 def scrape_lee():
     data = []
-    
+
     # 1. Enjoined List (Static, keep using BS4 for speed)
     try:
-        resp = fetch_url("https://www.sheriffleefl.org/animal-abuser-registry-enjoined/")
+        resp = fetch_url(
+            "https://www.sheriffleefl.org/animal-abuser-registry-enjoined/"
+        )
         soup = BeautifulSoup(resp.content, 'html.parser')
         table = soup.find('table')
         if table:
@@ -142,20 +192,20 @@ def scrape_lee():
                         'Type': 'Enjoined',
                         'Details': f"Case: {cols[1]}"
                     })
-    except Exception as e: 
+    except Exception as e:
         alert_failure(f"Lee Enjoined failed: {str(e)[:200]}")
 
-    # 2. Dynamic Registry Search (with pagination from new script)
+    # 2. Dynamic Registry Search (with pagination)
     try:
         with SeleniumDriver() as driver:
             driver.get("https://www.sheriffleefl.org/animal-abuser-search/")
             wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-            
+
             # Wait for initial table
             try:
                 wait.until(EC.presence_of_element_located((By.TAG_NAME, "tbody")))
             except TimeoutException:
-                logger.warning("Lee Registry: No initial table found (might be empty).")
+                logger.warning("Lee Registry: No initial table found.")
 
             page_num = 1
             while True:
@@ -170,90 +220,113 @@ def scrape_lee():
                             dob = cols[1].text.strip()
                             address = cols[2].text.strip()
                             charges = cols[3].text.strip()
-                            
+
                             # Try to find image URL
                             img_url = ''
                             try:
                                 img_elem = row.find_element(By.TAG_NAME, "img")
                                 src = img_elem.get_attribute('src')
                                 if src:
-                                    img_url = f" | Image: {src}" if src.startswith('http') else f" | Image: https://www.sheriffleefl.org{src}"
+                                    if src.startswith('http'):
+                                        img_url = f" | Image: {src}"
+                                    else:
+                                        img_url = f" | Image: https://www.sheriffleefl.org{src}"  # noqa: E501
                             except NoSuchElementException:
                                 pass
 
                             if name:
+                                details = (
+                                    f"DOB: {dob} | Charges: {charges} | "
+                                    f"Address: {address}{img_url}"
+                                )
                                 data.append({
                                     'Name': name,
-                                    'Date': 'Unknown', # No conviction date listed in generic table, usually just DOB
+                                    'Date': 'Unknown',
                                     'County': 'Lee',
                                     'Source': 'Lee Registry',
                                     'Type': 'Convicted',
-                                    'Details': f"DOB: {dob} | Charges: {charges} | Address: {address}{img_url}"
+                                    'Details': details
                                 })
                                 page_count += 1
-                    
-                    logger.info(f"Lee Registry Page {page_num}: Extracted {page_count} records.")
+
+                    logger.info(
+                        f"Lee Registry Page {page_num}: Extracted {page_count} records."
+                    )
 
                     # Pagination Logic
                     try:
-                        next_btn = driver.find_element(By.XPATH, "//a[contains(text(),'Next') or contains(text(),'>')]")
-                        if 'disabled' in next_btn.get_attribute('class') or not next_btn.is_enabled():
+                        next_btn = driver.find_element(
+                            By.XPATH,
+                            "//a[contains(text(),'Next') or contains(text(),'>')]"
+                        )
+                        if 'disabled' in next_btn.get_attribute('class') or \
+                           not next_btn.is_enabled():
                             break
-                        
-                        driver.execute_script("arguments[0].scrollIntoView(true);", next_btn)
+
+                        driver.execute_script(
+                            "arguments[0].scrollIntoView(true);", next_btn
+                        )
                         time.sleep(1)
                         next_btn.click()
                         page_num += 1
-                        
+
                         # Wait for table to stale/reload
                         wait.until(EC.staleness_of(rows[0]))
-                        wait.until(EC.presence_of_element_located((By.TAG_NAME, "tbody")))
-                        
+                        wait.until(
+                            EC.presence_of_element_located((By.TAG_NAME, "tbody"))
+                        )
+
                     except (NoSuchElementException, TimeoutException):
                         logger.info("Lee Registry: Reached last page.")
                         break
-                        
+
                 except Exception as e:
                     logger.warning(f"Error on Lee page {page_num}: {e}")
                     break
 
-    except Exception as e: 
+    except Exception as e:
         alert_failure(f"Lee Registry Selenium failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
 
+
 def scrape_marion():
     data = []
-    
+
     # --- 1. Static Abuser Registry (Convicted) ---
-    registry_url = "https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/animal-abuser-registry"
+    registry_url = (
+        "https://animalservices.marionfl.org/animal-control/"
+        "animal-control-and-pet-laws/animal-abuser-registry"
+    )
     try:
         resp = fetch_url(registry_url)
         soup = BeautifulSoup(resp.content, 'html.parser')
 
         # Find all relevant entries (paragraphs or list items)
         entries = soup.find_all(['p', 'li'], string=re.compile(r'Name:', re.I))
-        
+
         for entry in entries:
             text = entry.get_text(separator=' | ').strip()
             name_match = re.search(r'Name:\s*([^|]+)', text, re.I)
             date_match = re.search(r'(Conviction) Date:\s*([^|]+)', text, re.I)
-            
+
             if name_match:
                 name = name_match.group(1).strip()
                 date = date_match.group(2).strip() if date_match else 'Unknown'
-                
+
                 # --- Try to find an associated image ---
                 img_url = ''
                 try:
-                    # Look for an image tag within or very near the entry
-                    # This searches for an <img> tag that is a child of the entry
                     img_tag = entry.find('img')
-                    
-                    # If not a child, try finding an img tag with alt text matching the name
+
                     if not img_tag:
-                        # Use a regex that is not too strict (e.g., matches first part of name + "mugshot")
-                        img_tag = soup.find('img', alt=re.compile(re.escape(name.split()[0]) + r'.*mugshot', re.I))
+                        # Find by alt text regex
+                        img_tag = soup.find(
+                            'img',
+                            alt=re.compile(
+                                re.escape(name.split()[0]) + r'.*mugshot', re.I
+                            )
+                        )
 
                     if img_tag and img_tag.get('src'):
                         src = img_tag['src']
@@ -262,12 +335,12 @@ def scrape_marion():
                         elif src.startswith('http'):
                             img_url = src
                 except Exception:
-                    pass # Ignore image search failures
+                    pass  # Ignore image search failures
 
                 details_text = text
                 if img_url:
                     details_text += f" | Image: {img_url}"
-                
+
                 data.append({
                     'Name': name,
                     'Date': date,
@@ -280,25 +353,31 @@ def scrape_marion():
         alert_failure(f"Marion Registry (Static) failed: {str(e)[:200]}")
 
     # --- 2. Dynamic Enjoinment List (Requires Selenium) ---
-    enjoined_url = "https://animalservices.marionfl.org/animal-control/animal-control-and-pet-laws/civil-enjoinment-list"
+    enjoined_url = (
+        "https://animalservices.marionfl.org/animal-control/"
+        "animal-control-and-pet-laws/civil-enjoinment-list"
+    )
     try:
         with SeleniumDriver() as driver:
             driver.get(enjoined_url)
             wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
-            
+
             # Click the "Query" button to load the table
-            query_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Query'] | //button[contains(text(),'Query')]")))
+            query_btn_xpath = "//input[@value='Query'] | //button[contains(text(),'Query')]"  # noqa: E501
+            query_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, query_btn_xpath))
+            )
             driver.execute_script("arguments[0].scrollIntoView();", query_button)
             query_button.click()
-            
+
             # Wait for results table
             table = wait.until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-            
-            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:] # Skip header
+
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]
             for row in rows:
                 cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
-                
-                # Map columns: 0=Name, 1=Address, 2=Enjoinment_Date, 3=Case_Number
+
+                # Map columns: 0=Name, 1=Address, 2=Enjoinment_Date, 3=Case
                 if len(cols) >= 4:
                     data.append({
                         'Name': cols[0],
@@ -308,8 +387,8 @@ def scrape_marion():
                         'Type': 'Enjoined',
                         'Details': f"Address: {cols[1]} | Case: {cols[3]}"
                     })
-                elif len(cols) >= 2: # Fallback for partial rows
-                     data.append({
+                elif len(cols) >= 2:  # Fallback
+                    data.append({
                         'Name': cols[0],
                         'Date': 'Unknown',
                         'County': 'Marion',
@@ -322,38 +401,54 @@ def scrape_marion():
 
     return pd.DataFrame(data)
 
+
 def scrape_hillsborough():
     data = []
-    
+
     # 1. Enjoined PDF (Retaining robust table extraction)
-    pdf_url = "https://assets.contentstack.io/v3/assets/blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
+    pdf_url = (
+        "https://assets.contentstack.io/v3/assets/"
+        "blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
+    )
     try:
         # Use existing fetch_url helper
         resp = fetch_url(pdf_url, stream=True, verify=False)
-        
+
         with pdfplumber.open(resp.raw) as pdf:
             for page in pdf.pages:
                 tables = page.extract_tables()
                 for table in tables:
-                    if not table or len(table) < 2: continue
-                    
+                    if not table or len(table) < 2:
+                        continue
+
                     headers = [str(h).strip() for h in table[0]]
                     for row in table[1:]:
                         # Map row to headers safely
-                        row_data = dict(zip(headers, [str(cell).strip() if cell else '' for cell in row] + [''] * (len(headers) - len(row))))
-                        
+                        row_list = [str(cell).strip() if cell else '' for cell in row]
+                        row_data = dict(zip(headers, row_list + [''] * (len(headers) - len(row))))  # noqa: E501
+
                         if 'Last Name' in row_data and 'First Name' in row_data:
                             last = row_data.get('Last Name', '').strip()
                             first = row_data.get('First Name', '').strip()
                             name = f"{last} {first}".strip()
-                            
+
                             # Skip empty/header rows
-                            if not name or 'Last Name' in name: continue
+                            if not name or 'Last Name' in name:
+                                continue
 
                             details_parts = []
-                            if row_data.get('Case Number'): details_parts.append(f"Case: {row_data['Case Number']}")
-                            if row_data.get('End Date'): details_parts.append(f"End: {row_data['End Date']}")
-                            if row_data.get('Special Restrictions'): details_parts.append(f"Restrictions: {row_data['Special Restrictions']}")
+                            if row_data.get('Case Number'):
+                                details_parts.append(
+                                    f"Case: {row_data['Case Number']}"
+                                )
+                            if row_data.get('End Date'):
+                                details_parts.append(
+                                    f"End: {row_data['End Date']}"
+                                )
+                            if row_data.get('Special Restrictions'):
+                                details_parts.append(
+                                    f"Restrictions: {row_data['Special Restrictions']}"  # noqa: E501
+                                )
 
                             data.append({
                                 'Name': name,
@@ -363,91 +458,114 @@ def scrape_hillsborough():
                                 'Type': 'Enjoined',
                                 'Details': ' | '.join(details_parts)
                             })
-                            
-    except Exception as e: 
+
+    except Exception as e:
         alert_failure(f"Hillsborough PDF scraper failed: {str(e)[:200]}")
 
     # 2. General Registry (Selenium with new pagination logic)
     try:
         with SeleniumDriver() as driver:
-            driver.get("https://hcfl.gov/residents/animals-and-pets/animal-abuser-registry/search-the-registry")
+            driver.get(
+                "https://hcfl.gov/residents/animals-and-pets/"
+                "animal-abuser-registry/search-the-registry"
+            )
             wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
 
             # Wait for initial table load
             wait.until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-            
+
             page_num = 1
             while True:
                 # Extract rows from current page
-                rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:] # Skip header
+                rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]
                 if not rows:
-                    logger.warning(f"Hillsborough Search: No rows found on page {page_num}.")
+                    logger.warning(
+                        f"Hillsborough Search: No rows found on page {page_num}."
+                    )
                     break
 
                 for row in rows:
                     cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
-                    
-                    # New script expects 4 cols: Name, DOB, Address, Charges
+
+                    # Expects 4 cols: Name, DOB, Address, Charges
                     if len(cols) >= 4:
                         name = cols[0]
                         dob = cols[1]
                         address = cols[2]
                         charges = cols[3]
-                        
+
                         # Get image URL, don't download
                         img_url_str = ''
                         try:
                             img_elem = row.find_element(By.TAG_NAME, "img")
                             src = img_elem.get_attribute('src')
                             if src:
-                                if src.startswith('/'): src = 'https://hcfl.gov' + src
+                                if src.startswith('/'):
+                                    src = 'https://hcfl.gov' + src
                                 img_url_str = f" | Image: {src}"
                         except Exception:
-                            pass # No image
-                        
+                            pass  # No image
+
+                        details = (
+                            f"DOB: {dob} | Address: {address} | "
+                            f"Charges: {charges}{img_url_str}"
+                        )
                         data.append({
                             'Name': name,
-                            'Date': 'Unknown', # Table provides DOB, not conviction date
-                            'County': 'Hillsborough', 
-                            'Source': 'Hillsborough Registry', 
-                            'Type': 'Convicted', 
-                            'Details': f"DOB: {dob} | Address: {address} | Charges: {charges}{img_url_str}"
+                            'Date': 'Unknown',
+                            'County': 'Hillsborough',
+                            'Source': 'Hillsborough Registry',
+                            'Type': 'Convicted',
+                            'Details': details
                         })
 
                 logger.info(f"Hillsborough Search: Scraped page {page_num}.")
-                
+
                 # Pagination logic
                 try:
-                    next_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(),'Next') or contains(text(),'>')]")))
-                    if 'disabled' in next_btn.get_attribute('class') or not next_btn.is_enabled():
-                        logger.info("Hillsborough Search: Next button disabled, ending.")
-                        break # Last page
-                    
-                    driver.execute_script("arguments[0].scrollIntoView(true);", next_btn)
-                    time.sleep(1) 
+                    next_btn = wait.until(
+                        EC.element_to_be_clickable((
+                            By.XPATH,
+                            "//a[contains(text(),'Next') or contains(text(),'>')]"
+                        ))
+                    )
+                    if 'disabled' in next_btn.get_attribute('class') or \
+                       not next_btn.is_enabled():
+                        logger.info("Hillsborough Search: Next btn disabled.")
+                        break  # Last page
+
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", next_btn
+                    )
+                    time.sleep(1)
                     next_btn.click()
                     page_num += 1
-                    
+
                     # Wait for the page to reload
                     wait.until(EC.staleness_of(rows[0]))
-                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tr")))
-                    
+                    wait.until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "table tr")
+                        )
+                    )
+
                 except (TimeoutException, NoSuchElementException):
-                    logger.info("Hillsborough Search: No next button found, ending.")
-                    break # No "Next" button
-        
-    except Exception as e: 
+                    logger.info("Hillsborough Search: No next button found.")
+                    break  # No "Next" button
+
+    except Exception as e:
         alert_failure(f"Hillsborough Search (Selenium) failed: {str(e)[:200]}")
-        
+
     return pd.DataFrame(data)
+
 
 def scrape_volusia():
     data = []
-    pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"
+    pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"  # noqa: E501
     try:
         # Use existing fetch_url for consistent timeout/retry handling
         resp = fetch_url(pdf_url, stream=True, verify=False)
-        
+
         with pdfplumber.open(resp.raw) as pdf:
             for page in pdf.pages:
                 # Custom settings optimized for Volusia's grid-based PDF
@@ -461,62 +579,71 @@ def scrape_volusia():
                     "min_words_horizontal": 1,
                 }
                 tables = page.extract_tables(table_settings=table_settings)
-                
+
                 for table in tables:
-                    if not table: continue
+                    if not table:
+                        continue
                     for row in table:
                         # Clean and normalize row
-                        cleaned_row = [re.sub(r'\s+', ' ', str(cell).strip()) if cell else '' for cell in row]
-                        
-                        # Ensure we have enough columns and ignore header rows
-                        # Expected structure: [Name, DOB, Case#, Offense Date, Description]
-                        if len(cleaned_row) >= 3 and cleaned_row[0] and 'Name' not in cleaned_row[0]:
-                            # Pad row if it's short but has essential data
+                        cleaned_row = [
+                            re.sub(r'\s+', ' ', str(cell).strip()) if cell else ''
+                            for cell in row
+                        ]
+
+                        # Expected: [Name, DOB, Case#, Offense Date, Description]
+                        if len(cleaned_row) >= 3 and cleaned_row[0] and \
+                           'Name' not in cleaned_row[0]:
+                            # Pad row if it's short
                             if len(cleaned_row) < 5:
                                 cleaned_row += [''] * (5 - len(cleaned_row))
-                                
+
+                            details = (
+                                f"DOB: {cleaned_row[1]} | "
+                                f"Case: {cleaned_row[2]} | "
+                                f"Offense: {cleaned_row[4]}"
+                            )
                             data.append({
                                 'Name': cleaned_row[0],
-                                'Date': cleaned_row[3] if cleaned_row[3] else 'Unknown', # Offense Date
+                                'Date': cleaned_row[3] if cleaned_row[3] else 'Unknown',  # noqa: E501
                                 'County': 'Volusia',
                                 'Source': 'Volusia PDF',
                                 'Type': 'Convicted',
-                                'Details': f"DOB: {cleaned_row[1]} | Case: {cleaned_row[2]} | Offense: {cleaned_row[4]}"
+                                'Details': details
                             })
 
-    except Exception as e: 
+    except Exception as e:
         alert_failure(f"Volusia PDF improved scraper failed: {str(e)[:200]}")
-        
+
     return pd.DataFrame(data)
+
 
 def scrape_seminole():
     data = []
-    pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"
+    pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"  # noqa: E501
     try:
         # Use existing fetch_url with stream=True for pdfplumber
         resp = fetch_url(pdf_url, stream=True, verify=False)
-        
+
         with pdfplumber.open(resp.raw) as pdf:
             # Extract text from all pages
             all_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
-            
+
         # Split text into records starting with "Name:"
         # Prepend newline to ensure first record is caught by regex lookahead
         entries = re.split(r'(?=\nName:)', "\n" + all_text, flags=re.IGNORECASE)
-        
+
         for entry in entries:
             if not entry.strip() or 'Name:' not in entry:
                 continue
-                
+
             record = {}
             current_key = None
             for line in entry.split('\n'):
                 line = line.strip()
-                if not line: continue
-                
+                if not line:
+                    continue
+
                 # Look for "Key: Value" pattern
-                # We use a specific regex to avoid splitting on colons inside values (e.g. times)
-                # Assuming keys don't be extremely long to avoid false positives on free text
                 match = re.match(r'^([^:]{1,30}):\s*(.*)', line)
                 if match:
                     current_key, value = match.groups()
@@ -527,14 +654,18 @@ def scrape_seminole():
                     record[current_key] += ' ' + line
 
             if 'Name' in record:
-                # Determine best date field (Adjudication preferred, else look for other date keys)
-                # Seminole often uses "Adjudication Date" or "DOB"
+                # Determine best date field
                 date_val = record.get('Adjudication Date') or \
-                           next((v for k,v in record.items() if 'Date' in k and v.strip()), 'Unknown')
-                
-                # Compile all other fields into Details for searching/viewing
-                details = ' | '.join([f"{k}: {v}" for k,v in record.items() if k != 'Name'])
-                
+                    next(
+                        (v for k, v in record.items() if 'Date' in k and v.strip()),  # noqa: E501
+                        'Unknown'
+                    )
+
+                # Compile all other fields into Details
+                details = ' | '.join(
+                    [f"{k}: {v}" for k, v in record.items() if k != 'Name']
+                )
+
                 data.append({
                     'Name': record['Name'],
                     'Date': date_val,
@@ -544,63 +675,109 @@ def scrape_seminole():
                     'Details': details
                 })
 
-    except Exception as e: 
+    except Exception as e:
         alert_failure(f"Seminole PDF improved scraper failed: {str(e)[:200]}")
-        
+
     return pd.DataFrame(data)
+
 
 def scrape_pasco():
     data = []
     try:
         with SeleniumDriver() as driver:
             driver.get("https://app.pascoclerk.com/animalabusersearch/")
-            # Pasco's new app might need a "Search" button click even if empty
-            try: WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'], .btn-search"))).click()
-            except: pass
-            WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
+            # Pasco's new app might need a "Search" button click
+            try:
+                btn_css = "button[type='submit'], .btn-search"
+                btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, btn_css))
+                )
+                btn.click()
+            except Exception:
+                pass  # Ignore if no button
+            WebDriverWait(driver, SELENIUM_TIMEOUT).until(
+                EC.presence_of_element_located((By.TAG_NAME, "tr"))
+            )
             for row in driver.find_elements(By.CSS_SELECTOR, "table tbody tr"):
                 cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
                 if len(cols) >= 3:
-                     data.append({'Name': cols[0], 'Date': cols[2], 'County': 'Pasco', 'Source': 'Pasco Clerk App', 'Type': 'Convicted', 'Details': f"Case: {cols[1]}"})
-    except Exception as e: alert_failure(f"Pasco App failed: {str(e)[:200]}")
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[2],
+                        'County': 'Pasco',
+                        'Source': 'Pasco Clerk App',
+                        'Type': 'Convicted',
+                        'Details': f"Case: {cols[1]}"
+                    })
+    except Exception as e:
+        alert_failure(f"Pasco App failed: {str(e)[:200]}")
     return pd.DataFrame(data)
+
 
 def scrape_collier():
     data = []
     try:
-        resp = fetch_url("https://www2.colliersheriff.org/animalabusesearch", verify=False)
+        resp = fetch_url(
+            "https://www2.colliersheriff.org/animalabusesearch", verify=False
+        )
         soup = BeautifulSoup(resp.content, 'html.parser')
         for row in soup.select('table tr')[1:]:
             cols = [c.get_text(strip=True) for c in row.find_all('td')]
             if len(cols) >= 6:
-                data.append({'Name': cols[1], 'Date': cols[5] if cols[5] not in ['N/A',''] else datetime.now().strftime('%Y-%m-%d'), 'County': 'Collier', 'Source': 'Collier Sheriff', 'Type': cols[0], 'Details': f"DOB: {cols[2]} | Case: {cols[4]}"})
-    except Exception as e: alert_failure(f"Collier failed: {str(e)[:200]}")
+                date = cols[5] if cols[5] not in ['N/A', ''] else \
+                    datetime.now().strftime('%Y-%m-%d')
+                data.append({
+                    'Name': cols[1],
+                    'Date': date,
+                    'County': 'Collier',
+                    'Source': 'Collier Sheriff',
+                    'Type': cols[0],
+                    'Details': f"DOB: {cols[2]} | Case: {cols[4]}"
+                })
+    except Exception as e:
+        alert_failure(f"Collier failed: {str(e)[:200]}")
     return pd.DataFrame(data)
+
 
 def scrape_osceola():
     data = []
     try:
-        lines = extract_text_from_pdf("https://courts.osceolaclerk.com/reports/AnimalCrueltyReportWeb.pdf")
+        lines = extract_text_from_pdf(
+            "https://courts.osceolaclerk.com/reports/AnimalCrueltyReportWeb.pdf"
+        )
         for line in lines:
             # Look for case number patterns common in Osceola
             if re.search(r'\d{4}-\w{2}-\d+', line):
                 parts = [p for p in line.split('  ') if p]
                 if len(parts) >= 2:
-                     data.append({'Name': parts[0], 'Date': 'Unknown', 'County': 'Osceola', 'Source': 'Osceola Clerk PDF', 'Type': 'Convicted', 'Details': line})
-    except Exception as e: alert_failure(f"Osceola PDF failed: {str(e)[:200]}")
+                    data.append({
+                        'Name': parts[0],
+                        'Date': 'Unknown',
+                        'County': 'Osceola',
+                        'Source': 'Osceola Clerk PDF',
+                        'Type': 'Convicted',
+                        'Details': line
+                    })
+    except Exception as e:
+        alert_failure(f"Osceola PDF failed: {str(e)[:200]}")
     return pd.DataFrame(data)
+
 
 # --- ORCHESTRATOR ---
 
 def main():
     start_ts = time.time()
-    logger.info("Starting DNAFL Scraper Job v3.0...")
+    logger.info("Starting DNAFL Scraper Job v3.1 (Lint-Fixed)...")
     gc = get_gspread_client()
-    if not gc and not DRY_RUN: logger.critical("Credentials missing. Aborting."); sys.exit(1)
+    if not gc and not DRY_RUN:
+        logger.critical("Credentials missing. Aborting.")
+        sys.exit(1)
 
-    tasks = [scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia, 
-             scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola]
-    
+    tasks = [
+        scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia,
+        scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola
+    ]
+
     results = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_map = {executor.submit(task): task.__name__ for task in tasks}
@@ -608,11 +785,16 @@ def main():
             try:
                 df = future.result()
                 if not df.empty:
-                    logger.info(f"[{future_map[future]}] Success: {len(df)} records.")
+                    logger.info(
+                        f"[{future_map[future]}] Success: {len(df)} records."
+                    )
                     results.append(df)
                 else:
-                     logger.warning(f"[{future_map[future]}] yielded 0 records.")
-            except Exception as e: alert_failure(f"CRITICAL: {future_map[future]} crashed: {e}")
+                    logger.warning(
+                        f"[{future_map[future]}] yielded 0 records."
+                    )
+            except Exception as e:
+                alert_failure(f"CRITICAL: {future_map[future]} crashed: {e}")
 
     if results:
         master_df = standardize_data(pd.concat(results, ignore_index=True))
@@ -620,20 +802,28 @@ def main():
         if not DRY_RUN and gc:
             try:
                 sh = gc.open_by_key(SHEET_ID)
-                try: wks = sh.worksheet(MASTER_TAB_NAME)
-                except gspread.WorksheetNotFound: wks = sh.add_worksheet(MASTER_TAB_NAME, 1, 1)
+                try:
+                    wks = sh.worksheet(MASTER_TAB_NAME)
+                except gspread.WorksheetNotFound:
+                    wks = sh.add_worksheet(MASTER_TAB_NAME, 1, 1)
                 wks.clear()
-                wks.update([master_df.columns.tolist()] + master_df.astype(str).values.tolist())
+                wks.update(
+                    [master_df.columns.tolist()] +
+                    master_df.astype(str).values.tolist()
+                )
                 logger.info("Upload to Google Sheets complete.")
-            except Exception as e: alert_failure(f"Upload Failed: {e}")
+            except Exception as e:
+                alert_failure(f"Upload Failed: {e}")
         else:
-             master_df.to_csv("dry_run_master.csv", index=False)
-             logger.info("Dry run complete, saved to CSV.")
+            master_df.to_csv("dry_run_master.csv", index=False)
+            logger.info("Dry run complete, saved to CSV.")
     else:
         alert_failure("Global Failure: No data scraped.")
-        if not DRY_RUN: sys.exit(1)
+        if not DRY_RUN:
+            sys.exit(1)
 
     logger.info(f"Job finished in {time.time() - start_ts:.1f}s")
+
 
 if __name__ == '__main__':
     main()
