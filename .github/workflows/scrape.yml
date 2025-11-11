@@ -8,12 +8,13 @@ on:
     branches: [ main ]
     paths: [ 'scraper.py', 'requirements.txt' ]
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC
-  workflow_dispatch:  # Manual trigger
+    - cron: '0 2 * * *' # Daily at 2 AM UTC
+  workflow_dispatch: # Manual trigger
 
 jobs:
-  lint-and-test:
+  lint-test:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request' # Only on code changes
     steps:
     - uses: actions/checkout@v4
 
@@ -22,27 +23,66 @@ jobs:
       with:
         python-version: '3.12'
 
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: ${{ runner.os }}-pip-
+
     - name: Install dependencies
       run: pip install -r requirements.txt
 
     - name: Lint Python
       run: |
-        pip install flake8
-        flake8 scraper.py  # Python linting
+        pip install flake8  # Consider adding to a requirements-dev.txt
+        flake8 scraper.py
 
     - name: Test scraper (dry run)
-      run: |
-        python scraper.py --dry-run  # Full run, but in CI it updates sheets via secrets
+      run: python scraper.py --dry-run
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}  # If using scraper's webhook
 
-    - name: Commit updates (if sheets changed)
-      if: github.event_name != 'pull_request'
+    - name: Vulnerability scan
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add .
-        git diff --staged --quiet || git commit -m "Auto-update registries [$(date +%Y-%m-%d)]"
-        git push
+        pip install pip-audit
+        pip-audit --strict  # Scans for known vulnerabilities in deps
+
+  scrape-update:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' # Only on schedule/manual
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run scraper (full update)
+      run: python scraper.py  # No --dry-run: Updates sheets and exports backups
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}  # For failure alerts
+
+    - name: Clean old backups (optional: keep last 7)
+      run: |
+        cd data
+        ls -t *.csv | tail -n +8 | xargs rm -f  # Removes older than 7 newest CSVs
+
+    - name: Commit and push updates
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "Auto-update registries and backups [$(date +%Y-%m-%d)]"
+        file_pattern: 'data/*.csv'  # Only commit backups; add more if needed
