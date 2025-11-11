@@ -240,13 +240,50 @@ def scrape_hillsborough():
 
 def scrape_volusia():
     data = []
+    pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"
     try:
-        lines = extract_text_from_pdf("https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf")
-        for line in lines:
-             if re.match(r'^[A-Z][a-zA-Z]+,\s*[A-Z]', line):
-                date_match = re.search(r'\d{1,2}/\d{1,2}/\d{2,4}', line)
-                data.append({'Name': line.split('  ')[0], 'Date': date_match.group(0) if date_match else 'Unknown', 'County': 'Volusia', 'Source': 'Volusia PDF', 'Type': 'Convicted', 'Details': line})
-    except Exception as e: alert_failure(f"Volusia PDF failed: {str(e)[:200]}")
+        # Use existing fetch_url for consistent timeout/retry handling
+        resp = fetch_url(pdf_url, stream=True, verify=False)
+        
+        with pdfplumber.open(resp.raw) as pdf:
+            for page in pdf.pages:
+                # Custom settings optimized for Volusia's grid-based PDF
+                table_settings = {
+                    "vertical_strategy": "lines_strict",
+                    "horizontal_strategy": "lines_strict",
+                    "snap_tolerance": 3,
+                    "join_tolerance": 3,
+                    "edge_min_length": 3,
+                    "min_words_vertical": 3,
+                    "min_words_horizontal": 1,
+                }
+                tables = page.extract_tables(table_settings=table_settings)
+                
+                for table in tables:
+                    if not table: continue
+                    for row in table:
+                        # Clean and normalize row
+                        cleaned_row = [re.sub(r'\s+', ' ', str(cell).strip()) if cell else '' for cell in row]
+                        
+                        # Ensure we have enough columns and ignore header rows
+                        # Expected structure: [Name, DOB, Case#, Offense Date, Description]
+                        if len(cleaned_row) >= 3 and cleaned_row[0] and 'Name' not in cleaned_row[0]:
+                            # Pad row if it's short but has essential data
+                            if len(cleaned_row) < 5:
+                                cleaned_row += [''] * (5 - len(cleaned_row))
+                                
+                            data.append({
+                                'Name': cleaned_row[0],
+                                'Date': cleaned_row[3] if cleaned_row[3] else 'Unknown', # Offense Date
+                                'County': 'Volusia',
+                                'Source': 'Volusia PDF',
+                                'Type': 'Convicted',
+                                'Details': f"DOB: {cleaned_row[1]} | Case: {cleaned_row[2]} | Offense: {cleaned_row[4]}"
+                            })
+
+    except Exception as e: 
+        alert_failure(f"Volusia PDF improved scraper failed: {str(e)[:200]}")
+        
     return pd.DataFrame(data)
 
 def scrape_seminole():
