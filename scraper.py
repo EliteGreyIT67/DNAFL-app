@@ -124,29 +124,102 @@ def standardize_data(df):
 
 def scrape_lee():
     data = []
-    # 1. Enjoined List
+    
+    # 1. Enjoined List (Static, keep using BS4 for speed)
     try:
         resp = fetch_url("https://www.sheriffleefl.org/animal-abuser-registry-enjoined/")
         soup = BeautifulSoup(resp.content, 'html.parser')
-        for row in soup.select('table tr')[1:]:
-            cols = [c.get_text(strip=True) for c in row.find_all('td')]
-            if len(cols) >= 3:
-                data.append({'Name': cols[0], 'Date': cols[2], 'County': 'Lee', 'Source': 'Lee Enjoined', 'Type': 'Enjoined', 'Details': f"Case: {cols[1]}"})
-    except Exception as e: alert_failure(f"Lee Enjoined failed: {str(e)[:200]}")
+        table = soup.find('table')
+        if table:
+            for row in table.find_all('tr')[1:]:
+                cols = [c.get_text(strip=True) for c in row.find_all('td')]
+                if len(cols) >= 3:
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[2],
+                        'County': 'Lee',
+                        'Source': 'Lee Enjoined',
+                        'Type': 'Enjoined',
+                        'Details': f"Case: {cols[1]}"
+                    })
+    except Exception as e: 
+        alert_failure(f"Lee Enjoined failed: {str(e)[:200]}")
 
-    # 2. Other Registry (ccsheriff.org might be Charlotte, but treating as listed under Lee for now)
+    # 2. Dynamic Registry Search (with pagination from new script)
     try:
-        # This looks like a dynamic search page, might need Selenium if direct request fails
         with SeleniumDriver() as driver:
-             driver.get("https://animalabuserregistry.ccsheriff.org/")
-             # Wait for generic table data
-             WebDriverWait(driver, SELENIUM_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, "td")))
-             for row in driver.find_elements(By.TAG_NAME, "tr"):
-                 cols = [td.text for td in row.find_elements(By.TAG_NAME, "td")]
-                 if len(cols) >= 3:
-                      # Heuristic mapping based on typical registry table layout
-                      data.append({'Name': cols[0], 'Date': 'Unknown', 'County': 'Lee/Charlotte', 'Source': 'CCSO Registry', 'Type': 'Convicted', 'Details': ' | '.join(cols[1:])})
-    except Exception as e: alert_failure(f"CC Sheriff Registry failed: {str(e)[:200]}")
+            driver.get("https://www.sheriffleefl.org/animal-abuser-search/")
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+            
+            # Wait for initial table
+            try:
+                wait.until(EC.presence_of_element_located((By.TAG_NAME, "tbody")))
+            except TimeoutException:
+                logger.warning("Lee Registry: No initial table found (might be empty).")
+
+            page_num = 1
+            while True:
+                try:
+                    # Extract rows from current page
+                    rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+                    page_count = 0
+                    for row in rows:
+                        cols = row.find_elements(By.TAG_NAME, "td")
+                        if len(cols) >= 4:
+                            name = cols[0].text.strip()
+                            dob = cols[1].text.strip()
+                            address = cols[2].text.strip()
+                            charges = cols[3].text.strip()
+                            
+                            # Try to find image URL
+                            img_url = ''
+                            try:
+                                img_elem = row.find_element(By.TAG_NAME, "img")
+                                src = img_elem.get_attribute('src')
+                                if src:
+                                    img_url = f" | Image: {src}" if src.startswith('http') else f" | Image: https://www.sheriffleefl.org{src}"
+                            except NoSuchElementException:
+                                pass
+
+                            if name:
+                                data.append({
+                                    'Name': name,
+                                    'Date': 'Unknown', # No conviction date listed in generic table, usually just DOB
+                                    'County': 'Lee',
+                                    'Source': 'Lee Registry',
+                                    'Type': 'Convicted',
+                                    'Details': f"DOB: {dob} | Charges: {charges} | Address: {address}{img_url}"
+                                })
+                                page_count += 1
+                    
+                    logger.info(f"Lee Registry Page {page_num}: Extracted {page_count} records.")
+
+                    # Pagination Logic
+                    try:
+                        next_btn = driver.find_element(By.XPATH, "//a[contains(text(),'Next') or contains(text(),'>')]")
+                        if 'disabled' in next_btn.get_attribute('class') or not next_btn.is_enabled():
+                            break
+                        
+                        driver.execute_script("arguments[0].scrollIntoView(true);", next_btn)
+                        time.sleep(1)
+                        next_btn.click()
+                        page_num += 1
+                        
+                        # Wait for table to stale/reload
+                        wait.until(EC.staleness_of(rows[0]))
+                        wait.until(EC.presence_of_element_located((By.TAG_NAME, "tbody")))
+                        
+                    except (NoSuchElementException, TimeoutException):
+                        logger.info("Lee Registry: Reached last page.")
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"Error on Lee page {page_num}: {e}")
+                    break
+
+    except Exception as e: 
+        alert_failure(f"Lee Registry Selenium failed: {str(e)[:200]}")
+
     return pd.DataFrame(data)
 
 def scrape_marion():
@@ -288,16 +361,62 @@ def scrape_volusia():
 
 def scrape_seminole():
     data = []
-    # Prefer PDF for Seminole as it's often more complete than the web search
+    pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"
     try:
-        lines = extract_text_from_pdf("https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf")
-        for line in lines:
-            if re.search(r'\d{1,2}/\d{1,2}/\d{4}', line) and not line.startswith('Run Date'):
-                 # Extremely rough heuristic, Seminole PDF is unstructured
-                 parts = line.split()
-                 if len(parts) > 3:
-                     data.append({'Name': f"{parts[0]} {parts[1]}", 'Date': parts[-1] if '/' in parts[-1] else 'Unknown', 'County': 'Seminole', 'Source': 'Seminole PDF', 'Type': 'Convicted', 'Details': line})
-    except Exception as e: alert_failure(f"Seminole PDF failed: {str(e)[:200]}")
+        # Use existing fetch_url with stream=True for pdfplumber
+        resp = fetch_url(pdf_url, stream=True, verify=False)
+        
+        with pdfplumber.open(resp.raw) as pdf:
+            # Extract text from all pages
+            all_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+            
+        # Split text into records starting with "Name:"
+        # Prepend newline to ensure first record is caught by regex lookahead
+        entries = re.split(r'(?=\nName:)', "\n" + all_text, flags=re.IGNORECASE)
+        
+        for entry in entries:
+            if not entry.strip() or 'Name:' not in entry:
+                continue
+                
+            record = {}
+            current_key = None
+            for line in entry.split('\n'):
+                line = line.strip()
+                if not line: continue
+                
+                # Look for "Key: Value" pattern
+                # We use a specific regex to avoid splitting on colons inside values (e.g. times)
+                # Assuming keys don't be extremely long to avoid false positives on free text
+                match = re.match(r'^([^:]{1,30}):\s*(.*)', line)
+                if match:
+                    current_key, value = match.groups()
+                    current_key = current_key.strip()
+                    record[current_key] = value.strip()
+                elif current_key:
+                    # Continuation of previous key's value
+                    record[current_key] += ' ' + line
+
+            if 'Name' in record:
+                # Determine best date field (Adjudication preferred, else look for other date keys)
+                # Seminole often uses "Adjudication Date" or "DOB"
+                date_val = record.get('Adjudication Date') or \
+                           next((v for k,v in record.items() if 'Date' in k and v.strip()), 'Unknown')
+                
+                # Compile all other fields into Details for searching/viewing
+                details = ' | '.join([f"{k}: {v}" for k,v in record.items() if k != 'Name'])
+                
+                data.append({
+                    'Name': record['Name'],
+                    'Date': date_val,
+                    'County': 'Seminole',
+                    'Source': 'Seminole PDF',
+                    'Type': 'Convicted',
+                    'Details': details
+                })
+
+    except Exception as e: 
+        alert_failure(f"Seminole PDF improved scraper failed: {str(e)[:200]}")
+        
     return pd.DataFrame(data)
 
 def scrape_pasco():
