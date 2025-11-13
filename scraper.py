@@ -11,6 +11,7 @@ import logging
 import json
 import time
 import re
+import io  # <-- PDF FIX 1: ADDED THIS IMPORT
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -122,12 +123,17 @@ def fetch_url(url, stream=False, verify=True):
     return resp
 
 
+# --- PDF FIX 2: MODIFIED THIS FUNCTION ---
 def extract_text_from_pdf(url):
     """Helper to robustly extract all text from a PDF URL."""
     text_content = []
     try:
-        resp = fetch_url(url, stream=True, verify=False)
-        with pdfplumber.open(resp.raw) as pdf:
+        # Fetch the entire PDF content into memory first
+        resp = fetch_url(url, stream=False, verify=False)
+        # Create an in-memory file-like object (which is seekable)
+        pdf_file = io.BytesIO(resp.content)
+        
+        with pdfplumber.open(pdf_file) as pdf: # Pass the BytesIO object
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
@@ -411,10 +417,11 @@ def scrape_hillsborough():
         "blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
     )
     try:
-        # Use existing fetch_url helper
-        resp = fetch_url(pdf_url, stream=True, verify=False)
+        # Use fetch to get content, then pass to BytesIO
+        resp_content = fetch_url(pdf_url, stream=False, verify=False).content
+        pdf_file = io.BytesIO(resp_content)
 
-        with pdfplumber.open(resp.raw) as pdf:
+        with pdfplumber.open(pdf_file) as pdf:
             for page in pdf.pages:
                 tables = page.extract_tables()
                 for table in tables:
@@ -563,10 +570,11 @@ def scrape_volusia():
     data = []
     pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"  # noqa: E501
     try:
-        # Use existing fetch_url for consistent timeout/retry handling
-        resp = fetch_url(pdf_url, stream=True, verify=False)
+        # Use fetch to get content, then pass to BytesIO
+        resp_content = fetch_url(pdf_url, stream=False, verify=False).content
+        pdf_file = io.BytesIO(resp_content)
 
-        with pdfplumber.open(resp.raw) as pdf:
+        with pdfplumber.open(pdf_file) as pdf:
             for page in pdf.pages:
                 # Custom settings optimized for Volusia's grid-based PDF
                 table_settings = {
@@ -621,12 +629,8 @@ def scrape_seminole():
     data = []
     pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"  # noqa: E501
     try:
-        # Use existing fetch_url with stream=True for pdfplumber
-        resp = fetch_url(pdf_url, stream=True, verify=False)
-
-        with pdfplumber.open(resp.raw) as pdf:
-            # Extract text from all pages
-            all_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+        # Use the fixed extract_text_from_pdf helper
+        all_text = '\n'.join(extract_text_from_pdf(pdf_url))
 
         # Split text into records starting with "Name:"
         # Prepend newline to ensure first record is caught by regex lookahead
@@ -742,6 +746,7 @@ def scrape_collier():
 def scrape_osceola():
     data = []
     try:
+        # Use the fixed helper
         lines = extract_text_from_pdf(
             "https://courts.osceolaclerk.com/reports/AnimalCrueltyReportWeb.pdf"
         )
@@ -795,9 +800,9 @@ def scrape_broward():
                 if not rows and page_num == 1:
                     logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
                     break
-                
+
                 logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
-                
+
                 for row in rows:
                     cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
                     # [Name, DOB, Address, Case, Conviction Date, Reg. End]
@@ -819,7 +824,7 @@ def scrape_broward():
                 try:
                     # Store first row to check for staleness
                     first_row_id = rows[0].id 
-                    
+
                     next_btn = driver.find_element(By.LINK_TEXT, ">")
                     driver.execute_script(
                         "arguments[0].scrollIntoView(true);", next_btn
@@ -878,7 +883,7 @@ def scrape_new_county_template():
         #             'Date': cols[2], # e.g., Date of conviction
         #             'County': COUNTY_NAME,
         #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE,
+        #             'Type': RECORD_TYPE, # <-- SYNTAX FIX
         #             'Details': f"Case: {cols[1]}" # Add other info
         #         })
 
@@ -901,7 +906,7 @@ def scrape_new_county_template():
         #                 'Date': cols[2],
         #                 'County': COUNTY_NAME,
         #                 'Source': SOURCE_NAME,
-        #                 'Type': RECORD_TYPE,
+        #                 'Type': RECORD_TYPE, # <-- SYNTAX FIX
         #                 'Details': f"DOB: {cols[1]}"
         #             })
 
@@ -921,7 +926,7 @@ def scrape_new_county_template():
         #             'Date': 'Unknown',
         #             'County': COUNTY_NAME,
         #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE,
+        #             'Type': RECORD_TYPE, # <-- SYNTAX FIX
         #             'Details': f"Case: {case_num} | Full Line: {line}"
         #         })
         pass # Remove this 'pass' when you uncomment a method
