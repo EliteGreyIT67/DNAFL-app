@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.4 (Targeted Sources & Lint-Fixed)
+DNAFL Scraper v3.5 (Targeted Sources & Lint-Fixed)
 Aggregates Florida animal abuser registries using specific user-provided
 endpoints.
 """
@@ -49,7 +49,7 @@ GOOGLE_CREDENTIALS_ENV = os.getenv('GOOGLE_CREDENTIALS')
 WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL')
 
 SELENIUM_TIMEOUT = 30
-MAX_WORKERS = 3
+MAX_WORKERS = 4 # Increased slightly for new task
 DRY_RUN = '--dry-run' in sys.argv
 
 logging.basicConfig(
@@ -763,6 +763,175 @@ def scrape_osceola():
     return pd.DataFrame(data)
 
 
+def scrape_broward():
+    """
+    Scrapes the Broward County registry.
+    This page uses ASP.NET postbacks for pagination.
+    """
+    data = []
+    COUNTY_NAME = "Broward"
+    SOURCE_NAME = "Broward Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://www.broward.org/AnimalCare/AbusePublicList/AbusePublicList.aspx"
+
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            page_num = 1
+            while True:
+                # Wait for the table to exist
+                try:
+                    table = wait.until(
+                        EC.presence_of_element_located((By.ID, "gvAbuseList"))
+                    )
+                except TimeoutException:
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    break
+
+                # Get rows, skip header
+                rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+                if not rows and page_num == 1:
+                    logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
+                    break
+                
+                logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
+                
+                for row in rows:
+                    cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
+                    # [Name, DOB, Address, Case, Conviction Date, Reg. End]
+                    if len(cols) >= 6:
+                        details = (
+                            f"DOB: {cols[1]} | Address: {cols[2]} | "
+                            f"Case: {cols[3]} | Registration End: {cols[5]}"
+                        )
+                        data.append({
+                            'Name': cols[0], # Already 'Last, First'
+                            'Date': cols[4], # Conviction Date
+                            'County': COUNTY_NAME,
+                            'Source': SOURCE_NAME,
+                            'Type': RECORD_TYPE,
+                            'Details': details
+                        })
+
+                # Pagination Logic: Find the ">" link
+                try:
+                    # Store first row to check for staleness
+                    first_row_id = rows[0].id 
+                    
+                    next_btn = driver.find_element(By.LINK_TEXT, ">")
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", next_btn
+                    )
+                    time.sleep(1) # Brief pause
+                    next_btn.click()
+                    page_num += 1
+
+                    # Wait for the page to reload by checking staleness
+                    wait.until(
+                        EC.staleness_of(driver.find_element(By.ID, first_row_id))
+                    )
+                except NoSuchElementException:
+                    # No ">" link, this is the last page
+                    logger.info(f"{COUNTY_NAME}: Reached last page.")
+                    break
+                except Exception as e:
+                    logger.warning(f"{COUNTY_NAME}: Pagination error: {e}")
+                    break
+
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
+
+
+# --- NEW SCRAPER TEMPLATE ---
+def scrape_new_county_template():
+    """
+    TEMPLATE for scraping a new county.
+    1. Fill in the COUNTY_NAME, SOURCE_NAME, and URL.
+    2. Uncomment one of the methods (BS4, Selenium, or PDF).
+    3. Adjust the selectors (e.g., 'table tr') to match the website.
+    4. Map the scraped data to the dictionary fields.
+    5. Add this function to the `tasks` list in main().
+    """
+    data = []
+    # --- CONFIGURATION ---
+    COUNTY_NAME = "New County"
+    SOURCE_NAME = "New County Registry"
+    # Set the type, e.g., "Convicted" or "Enjoined"
+    RECORD_TYPE = "Convicted"
+
+    try:
+        # --- METHOD 1: Simple HTML Page (use requests + BeautifulSoup) ---
+        # url = "https://www.newcounty.gov/registry"
+        # resp = fetch_url(url)
+        # soup = BeautifulSoup(resp.content, 'html.parser')
+        #
+        # # Adjust this selector to find the rows
+        # for row in soup.find_all('tr')[1:]:
+        #     cols = [c.get_text(strip=True) for c in row.find_all('td')]
+        #     if len(cols) >= 3:
+        #         data.append({
+        #             'Name': cols[0],
+        #             'Date': cols[2], # e.g., Date of conviction
+        #             'County': COUNTY_NAME,
+        #             'Source': SOURCE_NAME,
+        #             'Type': RECORD_TYPE,
+        #             'Details': f"Case: {cols[1]}" # Add other info
+        #         })
+
+        # --- METHOD 2: Dynamic JavaScript Page (use Selenium) ---
+        # url = "https://www.newcounty.gov/search-app"
+        # with SeleniumDriver() as driver:
+        #     driver.get(url)
+        #     wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+        #
+        #     # Wait for the table/rows to exist
+        #     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))) # noqa: E501
+        #
+        #     # Add logic for clicking 'Search' or 'Next Page' if needed
+        #
+        #     for row in driver.find_elements(By.CSS_SELECTOR, "table tbody tr"):
+        #         cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
+        #         if len(cols) >= 3:
+        #             data.append({
+        #                 'Name': cols[0],
+        #                 'Date': cols[2],
+        #                 'County': COUNTY_NAME,
+        #                 'Source': SOURCE_NAME,
+        #                 'Type': RECORD_TYPE,
+        #                 'Details': f"DOB: {cols[1]}"
+        #             })
+
+        # --- METHOD 3: PDF Document (use pdfplumber) ---
+        # pdf_url = "https://www.newcounty.gov/registry.pdf"
+        # lines = extract_text_from_pdf(pdf_url)
+        #
+        # for line in lines:
+        #     # Add custom regex logic to parse lines
+        #     # This example looks for a line with a name and a case number
+        #     match = re.search(r'^(.*?)\s+(\d{4}-\w{2}-\d+)', line)
+        #     if match:
+        #         name = match.group(1).strip()
+        #         case_num = match.group(2).strip()
+        #         data.append({
+        #             'Name': name,
+        #             'Date': 'Unknown',
+        #             'County': COUNTY_NAME,
+        #             'Source': SOURCE_NAME,
+        #             'Type': RECORD_TYPE,
+        #             'Details': f"Case: {case_num} | Full Line: {line}"
+        #         })
+        pass # Remove this 'pass' when you uncomment a method
+
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
+
+
 # --- ORCHESTRATOR ---
 
 def main():
@@ -775,7 +944,10 @@ def main():
 
     tasks = [
         scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia,
-        scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola
+        scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola,
+        scrape_broward, # <-- NEWLY ADDED
+        # --- To add your new scraper, uncomment the line below ---
+        # scrape_new_county_template,
     ]
 
     results = []
