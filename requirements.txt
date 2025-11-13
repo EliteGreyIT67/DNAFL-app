@@ -6,3 +6,4 @@ pdfplumber
 beautifulsoup4
 selenium
 webdriver-manager
+tenacity
