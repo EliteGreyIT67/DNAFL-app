@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.5 (Targeted Sources & Lint-Fixed)
+DNAFL Scraper v3.7 (Resilient Seminole & Polk Added)
 Aggregates Florida animal abuser registries using specific user-provided
 endpoints.
 """
@@ -11,9 +11,10 @@ import logging
 import json
 import time
 import re
-import io  # <-- PDF FIX 1: ADDED THIS IMPORT
+import io
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urljoin # Added for joining relative URLs
 
 # Third-party imports
 import pandas as pd
@@ -50,7 +51,7 @@ GOOGLE_CREDENTIALS_ENV = os.getenv('GOOGLE_CREDENTIALS')
 WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL')
 
 SELENIUM_TIMEOUT = 30
-MAX_WORKERS = 4 # Increased slightly for new task
+MAX_WORKERS = 6 # Increased for 11 tasks
 DRY_RUN = '--dry-run' in sys.argv
 
 logging.basicConfig(
@@ -71,9 +72,10 @@ class SeleniumDriver:
         opts.add_argument('--disable-dev-shm-usage')
         opts.add_argument('--log-level=3')
         opts.add_argument("--window-size=1920,1080")
+        # Updated User-Agent
         opts.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 "
             "Safari/537.36"
         )
         self.driver = webdriver.Chrome(options=opts)
@@ -123,7 +125,7 @@ def fetch_url(url, stream=False, verify=True):
     return resp
 
 
-# --- PDF FIX 2: MODIFIED THIS FUNCTION ---
+# Your excellent PDF fix: Fetch all content first into a seekable BytesIO object
 def extract_text_from_pdf(url):
     """Helper to robustly extract all text from a PDF URL."""
     text_content = []
@@ -132,7 +134,7 @@ def extract_text_from_pdf(url):
         resp = fetch_url(url, stream=False, verify=False)
         # Create an in-memory file-like object (which is seekable)
         pdf_file = io.BytesIO(resp.content)
-        
+
         with pdfplumber.open(pdf_file) as pdf: # Pass the BytesIO object
             for page in pdf.pages:
                 page_text = page.extract_text()
@@ -417,7 +419,7 @@ def scrape_hillsborough():
         "blteea73b27b731f985/bltc47cc1e37ac0e54a/Enjoinment%20List.pdf"
     )
     try:
-        # Use fetch to get content, then pass to BytesIO
+        # Use fetch to get content, then pass to BytesIO (Your fix)
         resp_content = fetch_url(pdf_url, stream=False, verify=False).content
         pdf_file = io.BytesIO(resp_content)
 
@@ -570,7 +572,7 @@ def scrape_volusia():
     data = []
     pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"  # noqa: E501
     try:
-        # Use fetch to get content, then pass to BytesIO
+        # Use fetch to get content, then pass to BytesIO (Your fix)
         resp_content = fetch_url(pdf_url, stream=False, verify=False).content
         pdf_file = io.BytesIO(resp_content)
 
@@ -626,14 +628,44 @@ def scrape_volusia():
 
 
 def scrape_seminole():
+    """
+    IMPROVED: Scrapes the landing page to find the PDF link dynamically.
+    """
     data = []
-    pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"  # noqa: E501
+    COUNTY_NAME = "Seminole"
+    SOURCE_NAME = "Seminole PDF"
+    RECORD_TYPE = "Convicted"
+    # The new landing page URL you provided
+    landing_page_url = "https://www.seminolecountyfl.gov/departments-services/prepare-seminole/animal-services/animal-abuse-registry"
+
     try:
-        # Use the fixed extract_text_from_pdf helper
+        # 1. Scrape the landing page to find the PDF link
+        resp = fetch_url(landing_page_url)
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Find the link that contains "Registry" or "Report"
+        pdf_link = soup.find(
+            'a',
+            string=re.compile(r'(view|download|open|access).*registry|report', re.I) # noqa: E501
+        )
+        
+        # Fallback: Find any link with "AnimalCruelty" in the href
+        if not pdf_link:
+            pdf_link = soup.find('a', href=re.compile(r'AnimalCruelty', re.I))
+
+        if not pdf_link or not pdf_link.get('href'):
+            # If we still can't find it, try the old hardcoded link
+            logger.warning("Seminole: Could not find dynamic PDF link, trying old static link...") # noqa: E501
+            pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf" # noqa: E501
+        else:
+            # Build the absolute URL (handles relative links like /file.pdf)
+            pdf_url = urljoin(landing_page_url, pdf_link['href'])
+            logger.info(f"Seminole: Found dynamic PDF link: {pdf_url}")
+
+        # 2. Extract text from the (now found) PDF URL
         all_text = '\n'.join(extract_text_from_pdf(pdf_url))
 
-        # Split text into records starting with "Name:"
-        # Prepend newline to ensure first record is caught by regex lookahead
+        # 3. Parse the text (same as before)
         entries = re.split(r'(?=\nName:)', "\n" + all_text, flags=re.IGNORECASE)
 
         for entry in entries:
@@ -673,9 +705,9 @@ def scrape_seminole():
                 data.append({
                     'Name': record['Name'],
                     'Date': date_val,
-                    'County': 'Seminole',
-                    'Source': 'Seminole PDF',
-                    'Type': 'Convicted',
+                    'County': COUNTY_NAME,
+                    'Source': SOURCE_NAME,
+                    'Type': RECORD_TYPE,
                     'Details': details
                 })
 
@@ -800,9 +832,15 @@ def scrape_broward():
                 if not rows and page_num == 1:
                     logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
                     break
-
+                
+                # --- IMPROVEMENT: Filter out the ASP.NET pager row ---
+                rows = [
+                    row for row in rows
+                    if "gridPager" not in row.get_attribute("class")
+                ]
+                
                 logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
-
+                
                 for row in rows:
                     cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
                     # [Name, DOB, Address, Case, Conviction Date, Reg. End]
@@ -824,7 +862,7 @@ def scrape_broward():
                 try:
                     # Store first row to check for staleness
                     first_row_id = rows[0].id 
-
+                    
                     next_btn = driver.find_element(By.LINK_TEXT, ">")
                     driver.execute_script(
                         "arguments[0].scrollIntoView(true);", next_btn
@@ -851,7 +889,141 @@ def scrape_broward():
     return pd.DataFrame(data)
 
 
-# --- NEW SCRAPER TEMPLATE ---
+def scrape_leon():
+    """
+    Scrapes the Tallahassee / Leon County registry.
+    This page also uses ASP.NET postbacks for pagination.
+    """
+    data = []
+    COUNTY_NAME = "Leon"
+    SOURCE_NAME = "Tallahassee/Leon Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://www.talgov.com/animals/asc-abuse.aspx"
+
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            page_num = 1
+            while True:
+                # Wait for the table to exist
+                try:
+                    table_id = "p_lt_zoneContent_pageplaceholder_p_lt_zoneLeft_TAL_AnimalAbuseRegistry_gvRegistryList" # noqa: E501
+                    table = wait.until(
+                        EC.presence_of_element_located((By.ID, table_id))
+                    )
+                except TimeoutException:
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    break
+
+                # Get rows, skip header
+                rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+                if not rows and page_num == 1:
+                    logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
+                    break
+                
+                # --- IMPROVEMENT: Filter out the ASP.NET pager row ---
+                rows = [
+                    row for row in rows
+                    if "gridPager" not in row.get_attribute("class")
+                ]
+
+                logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
+                
+                for row in rows:
+                    cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
+                    # [Name, Address, Offense Date, Conviction Date, Exp. Date, Offense]
+                    if len(cols) >= 6:
+                        details = (
+                            f"Address: {cols[1]} | Offense Date: {cols[2]} | "
+                            f"Expiration: {cols[4]} | Offense: {cols[5]}"
+                        )
+                        data.append({
+                            'Name': cols[0], # Already 'Last, First'
+                            'Date': cols[3], # Conviction Date
+                            'County': COUNTY_NAME,
+                            'Source': SOURCE_NAME,
+                            'Type': RECORD_TYPE,
+                            'Details': details
+                        })
+
+                # Pagination Logic: Find the ">" link
+                try:
+                    # Store first row to check for staleness
+                    first_row_id = rows[0].id 
+                    
+                    next_btn = driver.find_element(By.LINK_TEXT, ">")
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", next_btn
+                    )
+                    time.sleep(1) # Brief pause
+                    next_btn.click()
+                    page_num += 1
+
+                    # Wait for the page to reload by checking staleness
+                    wait.until(
+                        EC.staleness_of(driver.find_element(By.ID, first_row_id))
+                    )
+                except NoSuchElementException:
+                    # No ">" link, this is the last page
+                    logger.info(f"{COUNTY_NAME}: Reached last page.")
+                    break
+                except Exception as e:
+                    logger.warning(f"{COUNTY_NAME}: Pagination error: {e}")
+                    break
+
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
+
+
+def scrape_polk():
+    """
+    Scrapes the Polk County registry.
+    This page uses a simple table.
+    """
+    data = []
+    COUNTY_NAME = "Polk"
+    SOURCE_NAME = "Polk Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://www.polksheriff.org/animal-abuse-registry"
+
+    try:
+        resp = fetch_url(url)
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Find the main table, select rows
+        table = soup.find('table')
+        if not table:
+            logger.warning("Polk: No table found on page.")
+            return pd.DataFrame(data)
+
+        for row in table.find_all('tr')[1:]: # Skip header
+            cols = [c.get_text(strip=True) for c in row.find_all('td')]
+            
+            # [Name, Address, DOB, Conviction Date, Statute, Expiration]
+            if len(cols) >= 6:
+                details = (
+                    f"Address: {cols[1]} | DOB: {cols[2]} | "
+                    f"Statute: {cols[4]} | Expiration: {cols[5]}"
+                )
+                data.append({
+                    'Name': cols[0],
+                    'Date': cols[3], # Conviction Date
+                    'County': COUNTY_NAME,
+                    'Source': SOURCE_NAME,
+                    'Type': RECORD_TYPE,
+                    'Details': details
+                })
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+    
+    return pd.DataFrame(data)
+
+
+# --- SCRAPER TEMPLATE ---
 def scrape_new_county_template():
     """
     TEMPLATE for scraping a new county.
@@ -926,7 +1098,7 @@ def scrape_new_county_template():
         #             'Date': 'Unknown',
         #             'County': COUNTY_NAME,
         #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE, # <-- SYNTAX FIX
+        #             'Type': RECORD_TYPE,
         #             'Details': f"Case: {case_num} | Full Line: {line}"
         #         })
         pass # Remove this 'pass' when you uncomment a method
@@ -941,7 +1113,7 @@ def scrape_new_county_template():
 
 def main():
     start_ts = time.time()
-    logger.info("Starting DNAFL Scraper Job v3.1 (Lint-Fixed)...")
+    logger.info("Starting DNAFL Scraper Job v3.7...")
     gc = get_gspread_client()
     if not gc and not DRY_RUN:
         logger.critical("Credentials missing. Aborting.")
@@ -949,8 +1121,11 @@ def main():
 
     tasks = [
         scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia,
-        scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola,
-        scrape_broward, # <-- NEWLY ADDED
+        scrape_seminole, # <-- This is now the resilient version
+        scrape_pasco, scrape_collier, scrape_osceola,
+        scrape_broward,
+        scrape_leon,
+        scrape_polk, # <-- NEWLY ADDED
         # --- To add your new scraper, uncomment the line below ---
         # scrape_new_county_template,
     ]
