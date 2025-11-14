@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.7 (Resilient Seminole & Polk Added)
+DNAFL Scraper v3.8 (Orange & Palm Beach Added)
 Aggregates Florida animal abuser registries using specific user-provided
 endpoints.
 """
@@ -51,7 +51,7 @@ GOOGLE_CREDENTIALS_ENV = os.getenv('GOOGLE_CREDENTIALS')
 WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL')
 
 SELENIUM_TIMEOUT = 30
-MAX_WORKERS = 6 # Increased for 11 tasks
+MAX_WORKERS = 7 # Increased for 13 tasks
 DRY_RUN = '--dry-run' in sys.argv
 
 logging.basicConfig(
@@ -981,7 +981,7 @@ def scrape_leon():
 
 def scrape_polk():
     """
-    Scrapes the Polk County registry.
+    NEW: Scrapes the Polk County registry.
     This page uses a simple table.
     """
     data = []
@@ -1023,7 +1023,143 @@ def scrape_polk():
     return pd.DataFrame(data)
 
 
-# --- SCRAPER TEMPLATE ---
+def scrape_orange():
+    """
+    NEW: Scrapes the Orange County registry.
+    This page uses a simple, paged table.
+    """
+    data = []
+    COUNTY_NAME = "Orange"
+    SOURCE_NAME = "Orange Registry"
+    RECORD_TYPE = "Convicted"
+    base_url = "https://www.ocnetpets.com/Programs/Animal-Abuse-Registry"
+
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(base_url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            page_num = 1
+            while True:
+                # Wait for the table to exist
+                try:
+                    table = wait.until(
+                        EC.presence_of_element_located((By.ID, "abuseRegistry"))
+                    )
+                except TimeoutException:
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    break
+
+                # Get rows, skip header
+                rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+                if not rows and page_num == 1:
+                    logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
+                    break
+                
+                logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
+                
+                for row in rows:
+                    cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
+                    # [Name, Offense, Conviction Date, Address]
+                    if len(cols) >= 4:
+                        details = (
+                            f"Offense: {cols[1]} | Address: {cols[3]}"
+                        )
+                        data.append({
+                            'Name': cols[0],
+                            'Date': cols[2], # Conviction Date
+                            'County': COUNTY_NAME,
+                            'Source': SOURCE_NAME,
+                            'Type': RECORD_TYPE,
+                            'Details': details
+                        })
+
+                # Pagination Logic: Find the "Next" link
+                try:
+                    first_row_id = rows[0].id 
+                    
+                    # Find 'Next' link specifically
+                    next_btn = driver.find_element(
+                        By.XPATH,
+                        "//a[contains(@class, 'page-link') and text()='Next']"
+                    )
+                    
+                    # Check if 'Next' is disabled (by checking parent 'li' class)
+                    parent_li = next_btn.find_element(By.XPATH, "..")
+                    if 'disabled' in parent_li.get_attribute("class"):
+                         logger.info(f"{COUNTY_NAME}: Reached last page (Next is disabled).")
+                         break
+
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", next_btn
+                    )
+                    time.sleep(1) # Brief pause
+                    next_btn.click()
+                    page_num += 1
+
+                    # Wait for the page to reload by checking staleness
+                    wait.until(
+                        EC.staleness_of(driver.find_element(By.ID, first_row_id))
+                    )
+                except NoSuchElementException:
+                    # No "Next" link, this is the last page
+                    logger.info(f"{COUNTY_NAME}: Reached last page (No Next link).")
+                    break
+                except Exception as e:
+                    logger.warning(f"{COUNTY_NAME}: Pagination error: {e}")
+                    break
+
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
+
+
+def scrape_palmbeach():
+    """
+    NEW: Scrapes the Palm Beach County registry.
+    This page uses a simple table.
+    """
+    data = []
+    COUNTY_NAME = "Palm Beach"
+    SOURCE_NAME = "Palm Beach Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://discover.pbcgov.org/publicsafety/animalcare/Pages/Abuser-Registry.aspx" # noqa: E501
+
+    try:
+        resp = fetch_url(url)
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Find the main table by its summary attribute
+        table = soup.find('table', summary=re.compile(r'Animal Abuser Registry', re.I))
+        if not table:
+            logger.warning("Palm Beach: No table found on page.")
+            return pd.DataFrame(data)
+
+        for row in table.find_all('tr')[1:]: # Skip header
+            cols = [c.get_text(strip=True) for c in row.find_all('td')]
+            
+            # [Name, Address, DOB, Conviction Date, Authority, Expiration]
+            if len(cols) >= 6:
+                details = (
+                    f"Address: {cols[1]} | DOB: {cols[2]} | "
+                    f"Authority: {cols[4]} | Expiration: {cols[5]}"
+                )
+                data.append({
+                    'Name': cols[0],
+                    'Date': cols[3], # Conviction Date
+                    'County': COUNTY_NAME,
+                    'Source': SOURCE_NAME,
+                    'Type': RECORD_TYPE,
+                    'Details': details
+                })
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+    
+    return pd.DataFrame(data)
+
+
+# --- NEW SCRAPER TEMPLATE ---
 def scrape_new_county_template():
     """
     TEMPLATE for scraping a new county.
@@ -1055,7 +1191,7 @@ def scrape_new_county_template():
         #             'Date': cols[2], # e.g., Date of conviction
         #             'County': COUNTY_NAME,
         #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE, # <-- SYNTAX FIX
+        #             'Type': RECORD_TYPE,
         #             'Details': f"Case: {cols[1]}" # Add other info
         #         })
 
@@ -1078,7 +1214,7 @@ def scrape_new_county_template():
         #                 'Date': cols[2],
         #                 'County': COUNTY_NAME,
         #                 'Source': SOURCE_NAME,
-        #                 'Type': RECORD_TYPE, # <-- SYNTAX FIX
+        #                 'Type': RECORD_TYPE,
         #                 'Details': f"DOB: {cols[1]}"
         #             })
 
@@ -1113,7 +1249,7 @@ def scrape_new_county_template():
 
 def main():
     start_ts = time.time()
-    logger.info("Starting DNAFL Scraper Job v3.7...")
+    logger.info("Starting DNAFL Scraper Job v3.8...")
     gc = get_gspread_client()
     if not gc and not DRY_RUN:
         logger.critical("Credentials missing. Aborting.")
@@ -1121,11 +1257,13 @@ def main():
 
     tasks = [
         scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia,
-        scrape_seminole, # <-- This is now the resilient version
+        scrape_seminole, 
         scrape_pasco, scrape_collier, scrape_osceola,
         scrape_broward,
         scrape_leon,
-        scrape_polk, # <-- NEWLY ADDED
+        scrape_polk,
+        scrape_orange, # <-- NEW
+        scrape_palmbeach, # <-- NEW
         # --- To add your new scraper, uncomment the line below ---
         # scrape_new_county_template,
     ]
