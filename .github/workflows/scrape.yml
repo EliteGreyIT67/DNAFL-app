@@ -72,32 +72,6 @@ jobs:
     - name: Install dependencies
       run: pip install -r requirements.txt
  
-    - name: Install Google Chrome
-      run: |
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        sudo apt-get update
-        sudo apt-get install google-chrome-stable -y
- 
-    - name: Get Chrome version
-      id: chrome-version
-      run: |
-        FULL_VERSION=$(google-chrome --version | awk '{print $3}')
-        MAJOR_VERSION=${FULL_VERSION%%.*}
-        echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
-        echo "major_version=$MAJOR_VERSION" >> $GITHUB_OUTPUT
- 
-    - name: Install ChromeDriver
-      run: |
-        MAJOR_VERSION=${{ steps.chrome-version.outputs.major_version }}
-        DRIVER_VERSION=$(curl -sS "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$MAJOR_VERSION")
-        wget -N "https://chromedriver.storage.googleapis.com/$DRIVER_VERSION/chromedriver_linux64.zip" -P ~/
-        unzip ~/chromedriver_linux64.zip -d ~/
-        rm ~/chromedriver_linux64.zip
-        sudo mv -f ~/chromedriver /usr/local/bin/chromedriver
-        sudo chown root:root /usr/local/bin/chromedriver
-        sudo chmod 0755 /usr/local/bin/chromedriver
- 
     - name: Install additional dependencies for Selenium
       run: sudo apt-get install -y libnss3 libatk-bridge2.0-0 libgbm1 xvfb
  
