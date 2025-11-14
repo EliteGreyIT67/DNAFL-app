@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNAFL Scraper v3.8 (Orange & Palm Beach Added)
+DNAFL Scraper v3.9 (Miami-Dade & Brevard Added)
 Aggregates Florida animal abuser registries using specific user-provided
 endpoints.
 """
@@ -14,7 +14,7 @@ import re
 import io
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urljoin # Added for joining relative URLs
+from urllib.parse import urljoin  # Added for joining relative URLs
 
 # Third-party imports
 import pandas as pd
@@ -51,7 +51,7 @@ GOOGLE_CREDENTIALS_ENV = os.getenv('GOOGLE_CREDENTIALS')
 WEBHOOK_URL = os.getenv('ALERT_WEBHOOK_URL')
 
 SELENIUM_TIMEOUT = 30
-MAX_WORKERS = 7 # Increased for 13 tasks
+MAX_WORKERS = 9  # Increased for 15 tasks
 DRY_RUN = '--dry-run' in sys.argv
 
 logging.basicConfig(
@@ -59,7 +59,6 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(threadName)s: %(message)s'
 )
 logger = logging.getLogger('DNAFL_Scraper')
-
 
 # --- CORE UTILITIES ---
 
@@ -87,7 +86,6 @@ class SeleniumDriver:
         if hasattr(self, 'driver'):
             self.driver.quit()
 
-
 def alert_failure(message):
     logger.error(message)
     if WEBHOOK_URL and not DRY_RUN:
@@ -99,7 +97,6 @@ def alert_failure(message):
             )
         except Exception:
             pass
-
 
 def get_gspread_client():
     scopes = [
@@ -117,13 +114,11 @@ def get_gspread_client():
         return None
     return gspread.authorize(creds)
 
-
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def fetch_url(url, stream=False, verify=True):
     resp = requests.get(url, timeout=45, stream=stream, verify=verify)
     resp.raise_for_status()
     return resp
-
 
 # Your excellent PDF fix: Fetch all content first into a seekable BytesIO object
 def extract_text_from_pdf(url):
@@ -135,7 +130,7 @@ def extract_text_from_pdf(url):
         # Create an in-memory file-like object (which is seekable)
         pdf_file = io.BytesIO(resp.content)
 
-        with pdfplumber.open(pdf_file) as pdf: # Pass the BytesIO object
+        with pdfplumber.open(pdf_file) as pdf:  # Pass the BytesIO object
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
@@ -143,7 +138,6 @@ def extract_text_from_pdf(url):
     except Exception as e:
         logger.warning(f"PDF extraction warning for {url}: {e}")
     return text_content
-
 
 def standardize_data(df):
     if df.empty:
@@ -174,7 +168,6 @@ def standardize_data(df):
     return df.drop(columns=['Date_Parsed']).sort_values(
         'Date', ascending=False
     ).drop_duplicates(subset=['Name', 'County', 'Date'])
-
 
 # --- SCRAPERS ---
 
@@ -238,7 +231,7 @@ def scrape_lee():
                                     if src.startswith('http'):
                                         img_url = f" | Image: {src}"
                                     else:
-                                        img_url = f" | Image: https://www.sheriffleefl.org{src}"  # noqa: E501
+                                        img_url = f" | Image: https://www.sheriffleefl.org{src}"
                             except NoSuchElementException:
                                 pass
 
@@ -296,7 +289,6 @@ def scrape_lee():
         alert_failure(f"Lee Registry Selenium failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
-
 
 def scrape_marion():
     data = []
@@ -371,7 +363,7 @@ def scrape_marion():
             wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
 
             # Click the "Query" button to load the table
-            query_btn_xpath = "//input[@value='Query'] | //button[contains(text(),'Query')]"  # noqa: E501
+            query_btn_xpath = "//input[@value='Query'] | //button[contains(text(),'Query')]"
             query_button = wait.until(
                 EC.element_to_be_clickable((By.XPATH, query_btn_xpath))
             )
@@ -409,7 +401,6 @@ def scrape_marion():
 
     return pd.DataFrame(data)
 
-
 def scrape_hillsborough():
     data = []
 
@@ -434,7 +425,7 @@ def scrape_hillsborough():
                     for row in table[1:]:
                         # Map row to headers safely
                         row_list = [str(cell).strip() if cell else '' for cell in row]
-                        row_data = dict(zip(headers, row_list + [''] * (len(headers) - len(row))))  # noqa: E501
+                        row_data = dict(zip(headers, row_list + [''] * (len(headers) - len(row))))
 
                         if 'Last Name' in row_data and 'First Name' in row_data:
                             last = row_data.get('Last Name', '').strip()
@@ -456,7 +447,7 @@ def scrape_hillsborough():
                                 )
                             if row_data.get('Special Restrictions'):
                                 details_parts.append(
-                                    f"Restrictions: {row_data['Special Restrictions']}"  # noqa: E501
+                                    f"Restrictions: {row_data['Special Restrictions']}"
                                 )
 
                             data.append({
@@ -567,10 +558,9 @@ def scrape_hillsborough():
 
     return pd.DataFrame(data)
 
-
 def scrape_volusia():
     data = []
-    pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"  # noqa: E501
+    pdf_url = "https://vcservices.vcgov.org/AnimalControlAttachments/VolusiaAnimalAbuse.pdf"
     try:
         # Use fetch to get content, then pass to BytesIO (Your fix)
         resp_content = fetch_url(pdf_url, stream=False, verify=False).content
@@ -614,7 +604,7 @@ def scrape_volusia():
                             )
                             data.append({
                                 'Name': cleaned_row[0],
-                                'Date': cleaned_row[3] if cleaned_row[3] else 'Unknown',  # noqa: E501
+                                'Date': cleaned_row[3] if cleaned_row[3] else 'Unknown',
                                 'County': 'Volusia',
                                 'Source': 'Volusia PDF',
                                 'Type': 'Convicted',
@@ -625,7 +615,6 @@ def scrape_volusia():
         alert_failure(f"Volusia PDF improved scraper failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
-
 
 def scrape_seminole():
     """
@@ -646,17 +635,17 @@ def scrape_seminole():
         # Find the link that contains "Registry" or "Report"
         pdf_link = soup.find(
             'a',
-            string=re.compile(r'(view|download|open|access).*registry|report', re.I) # noqa: E501
+            string=re.compile(r'(view|download|open|access).*registry|report', re.I)
         )
-        
+
         # Fallback: Find any link with "AnimalCruelty" in the href
         if not pdf_link:
             pdf_link = soup.find('a', href=re.compile(r'AnimalCruelty', re.I))
 
         if not pdf_link or not pdf_link.get('href'):
             # If we still can't find it, try the old hardcoded link
-            logger.warning("Seminole: Could not find dynamic PDF link, trying old static link...") # noqa: E501
-            pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf" # noqa: E501
+            logger.warning("Seminole: Could not find dynamic PDF link, trying old static link...")
+            pdf_url = "https://scwebapp2.seminolecountyfl.gov:6443/AnimalCruelty/AnimalCrueltyReporty.pdf"
         else:
             # Build the absolute URL (handles relative links like /file.pdf)
             pdf_url = urljoin(landing_page_url, pdf_link['href'])
@@ -693,7 +682,7 @@ def scrape_seminole():
                 # Determine best date field
                 date_val = record.get('Adjudication Date') or \
                     next(
-                        (v for k, v in record.items() if 'Date' in k and v.strip()),  # noqa: E501
+                        (v for k, v in record.items() if 'Date' in k and v.strip()),
                         'Unknown'
                     )
 
@@ -715,7 +704,6 @@ def scrape_seminole():
         alert_failure(f"Seminole PDF improved scraper failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
-
 
 def scrape_pasco():
     data = []
@@ -749,7 +737,6 @@ def scrape_pasco():
         alert_failure(f"Pasco App failed: {str(e)[:200]}")
     return pd.DataFrame(data)
 
-
 def scrape_collier():
     data = []
     try:
@@ -774,7 +761,6 @@ def scrape_collier():
         alert_failure(f"Collier failed: {str(e)[:200]}")
     return pd.DataFrame(data)
 
-
 def scrape_osceola():
     data = []
     try:
@@ -785,7 +771,7 @@ def scrape_osceola():
         for line in lines:
             # Look for case number patterns common in Osceola
             if re.search(r'\d{4}-\w{2}-\d+', line):
-                parts = [p for p in line.split('  ') if p]
+                parts = [p for p in line.split(' ') if p]
                 if len(parts) >= 2:
                     data.append({
                         'Name': parts[0],
@@ -798,7 +784,6 @@ def scrape_osceola():
     except Exception as e:
         alert_failure(f"Osceola PDF failed: {str(e)[:200]}")
     return pd.DataFrame(data)
-
 
 def scrape_broward():
     """
@@ -824,7 +809,7 @@ def scrape_broward():
                         EC.presence_of_element_located((By.ID, "gvAbuseList"))
                     )
                 except TimeoutException:
-                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.")
                     break
 
                 # Get rows, skip header
@@ -832,15 +817,15 @@ def scrape_broward():
                 if not rows and page_num == 1:
                     logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
                     break
-                
+
                 # --- IMPROVEMENT: Filter out the ASP.NET pager row ---
                 rows = [
                     row for row in rows
                     if "gridPager" not in row.get_attribute("class")
                 ]
-                
+
                 logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
-                
+
                 for row in rows:
                     cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
                     # [Name, DOB, Address, Case, Conviction Date, Reg. End]
@@ -850,8 +835,8 @@ def scrape_broward():
                             f"Case: {cols[3]} | Registration End: {cols[5]}"
                         )
                         data.append({
-                            'Name': cols[0], # Already 'Last, First'
-                            'Date': cols[4], # Conviction Date
+                            'Name': cols[0],  # Already 'Last, First'
+                            'Date': cols[4],  # Conviction Date
                             'County': COUNTY_NAME,
                             'Source': SOURCE_NAME,
                             'Type': RECORD_TYPE,
@@ -861,13 +846,13 @@ def scrape_broward():
                 # Pagination Logic: Find the ">" link
                 try:
                     # Store first row to check for staleness
-                    first_row_id = rows[0].id 
-                    
+                    first_row_id = rows[0].id
+
                     next_btn = driver.find_element(By.LINK_TEXT, ">")
                     driver.execute_script(
                         "arguments[0].scrollIntoView(true);", next_btn
                     )
-                    time.sleep(1) # Brief pause
+                    time.sleep(1)  # Brief pause
                     next_btn.click()
                     page_num += 1
 
@@ -887,7 +872,6 @@ def scrape_broward():
         alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
-
 
 def scrape_leon():
     """
@@ -909,12 +893,12 @@ def scrape_leon():
             while True:
                 # Wait for the table to exist
                 try:
-                    table_id = "p_lt_zoneContent_pageplaceholder_p_lt_zoneLeft_TAL_AnimalAbuseRegistry_gvRegistryList" # noqa: E501
+                    table_id = "p_lt_zoneContent_pageplaceholder_p_lt_zoneLeft_TAL_AnimalAbuseRegistry_gvRegistryList"
                     table = wait.until(
                         EC.presence_of_element_located((By.ID, table_id))
                     )
                 except TimeoutException:
-                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.")
                     break
 
                 # Get rows, skip header
@@ -922,7 +906,7 @@ def scrape_leon():
                 if not rows and page_num == 1:
                     logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
                     break
-                
+
                 # --- IMPROVEMENT: Filter out the ASP.NET pager row ---
                 rows = [
                     row for row in rows
@@ -930,7 +914,7 @@ def scrape_leon():
                 ]
 
                 logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
-                
+
                 for row in rows:
                     cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
                     # [Name, Address, Offense Date, Conviction Date, Exp. Date, Offense]
@@ -940,8 +924,8 @@ def scrape_leon():
                             f"Expiration: {cols[4]} | Offense: {cols[5]}"
                         )
                         data.append({
-                            'Name': cols[0], # Already 'Last, First'
-                            'Date': cols[3], # Conviction Date
+                            'Name': cols[0],  # Already 'Last, First'
+                            'Date': cols[3],  # Conviction Date
                             'County': COUNTY_NAME,
                             'Source': SOURCE_NAME,
                             'Type': RECORD_TYPE,
@@ -951,13 +935,13 @@ def scrape_leon():
                 # Pagination Logic: Find the ">" link
                 try:
                     # Store first row to check for staleness
-                    first_row_id = rows[0].id 
-                    
+                    first_row_id = rows[0].id
+
                     next_btn = driver.find_element(By.LINK_TEXT, ">")
                     driver.execute_script(
                         "arguments[0].scrollIntoView(true);", next_btn
                     )
-                    time.sleep(1) # Brief pause
+                    time.sleep(1)  # Brief pause
                     next_btn.click()
                     page_num += 1
 
@@ -977,7 +961,6 @@ def scrape_leon():
         alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
-
 
 def scrape_polk():
     """
@@ -1000,9 +983,9 @@ def scrape_polk():
             logger.warning("Polk: No table found on page.")
             return pd.DataFrame(data)
 
-        for row in table.find_all('tr')[1:]: # Skip header
+        for row in table.find_all('tr')[1:]:  # Skip header
             cols = [c.get_text(strip=True) for c in row.find_all('td')]
-            
+
             # [Name, Address, DOB, Conviction Date, Statute, Expiration]
             if len(cols) >= 6:
                 details = (
@@ -1011,7 +994,7 @@ def scrape_polk():
                 )
                 data.append({
                     'Name': cols[0],
-                    'Date': cols[3], # Conviction Date
+                    'Date': cols[3],  # Conviction Date
                     'County': COUNTY_NAME,
                     'Source': SOURCE_NAME,
                     'Type': RECORD_TYPE,
@@ -1019,9 +1002,8 @@ def scrape_polk():
                 })
     except Exception as e:
         alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
-    
-    return pd.DataFrame(data)
 
+    return pd.DataFrame(data)
 
 def scrape_orange():
     """
@@ -1047,7 +1029,7 @@ def scrape_orange():
                         EC.presence_of_element_located((By.ID, "abuseRegistry"))
                     )
                 except TimeoutException:
-                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.") # noqa: E501
+                    logger.warning(f"{COUNTY_NAME}: No table found on page {page_num}.")
                     break
 
                 # Get rows, skip header
@@ -1055,9 +1037,9 @@ def scrape_orange():
                 if not rows and page_num == 1:
                     logger.warning(f"{COUNTY_NAME}: Table found but no data rows.")
                     break
-                
+
                 logger.info(f"{COUNTY_NAME}: Scraping page {page_num}...")
-                
+
                 for row in rows:
                     cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
                     # [Name, Offense, Conviction Date, Address]
@@ -1067,7 +1049,7 @@ def scrape_orange():
                         )
                         data.append({
                             'Name': cols[0],
-                            'Date': cols[2], # Conviction Date
+                            'Date': cols[2],  # Conviction Date
                             'County': COUNTY_NAME,
                             'Source': SOURCE_NAME,
                             'Type': RECORD_TYPE,
@@ -1076,14 +1058,14 @@ def scrape_orange():
 
                 # Pagination Logic: Find the "Next" link
                 try:
-                    first_row_id = rows[0].id 
-                    
+                    first_row_id = rows[0].id
+
                     # Find 'Next' link specifically
                     next_btn = driver.find_element(
                         By.XPATH,
                         "//a[contains(@class, 'page-link') and text()='Next']"
                     )
-                    
+
                     # Check if 'Next' is disabled (by checking parent 'li' class)
                     parent_li = next_btn.find_element(By.XPATH, "..")
                     if 'disabled' in parent_li.get_attribute("class"):
@@ -1093,7 +1075,7 @@ def scrape_orange():
                     driver.execute_script(
                         "arguments[0].scrollIntoView(true);", next_btn
                     )
-                    time.sleep(1) # Brief pause
+                    time.sleep(1)  # Brief pause
                     next_btn.click()
                     page_num += 1
 
@@ -1114,7 +1096,6 @@ def scrape_orange():
 
     return pd.DataFrame(data)
 
-
 def scrape_palmbeach():
     """
     NEW: Scrapes the Palm Beach County registry.
@@ -1124,7 +1105,7 @@ def scrape_palmbeach():
     COUNTY_NAME = "Palm Beach"
     SOURCE_NAME = "Palm Beach Registry"
     RECORD_TYPE = "Convicted"
-    url = "https://discover.pbcgov.org/publicsafety/animalcare/Pages/Abuser-Registry.aspx" # noqa: E501
+    url = "https://discover.pbcgov.org/publicsafety/animalcare/Pages/Abuser-Registry.aspx"
 
     try:
         resp = fetch_url(url)
@@ -1136,9 +1117,9 @@ def scrape_palmbeach():
             logger.warning("Palm Beach: No table found on page.")
             return pd.DataFrame(data)
 
-        for row in table.find_all('tr')[1:]: # Skip header
+        for row in table.find_all('tr')[1:]:  # Skip header
             cols = [c.get_text(strip=True) for c in row.find_all('td')]
-            
+
             # [Name, Address, DOB, Conviction Date, Authority, Expiration]
             if len(cols) >= 6:
                 details = (
@@ -1147,7 +1128,7 @@ def scrape_palmbeach():
                 )
                 data.append({
                     'Name': cols[0],
-                    'Date': cols[3], # Conviction Date
+                    'Date': cols[3],  # Conviction Date
                     'County': COUNTY_NAME,
                     'Source': SOURCE_NAME,
                     'Type': RECORD_TYPE,
@@ -1155,9 +1136,119 @@ def scrape_palmbeach():
                 })
     except Exception as e:
         alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
-    
+
     return pd.DataFrame(data)
 
+def scrape_miamidade():
+    """
+    NEW: Scrapes the Miami-Dade County registry.
+    Assumes a dynamic search page; attempts to submit empty search for all records.
+    """
+    data = []
+    COUNTY_NAME = "Miami-Dade"
+    SOURCE_NAME = "Miami-Dade Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://www.miamidade.gov/Apps/ASD/crueltyweb/"
+
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            # Try to find and click search button (assuming it loads all on empty search)
+            try:
+                query_btn_xpath = "//input[@value='Search'] | //button[contains(text(),'Search') or contains(text(),'Query')]"
+                query_button = wait.until(
+                    EC.element_to_be_clickable((By.XPATH, query_btn_xpath))
+                )
+                driver.execute_script("arguments[0].scrollIntoView();", query_button)
+                query_button.click()
+            except Exception:
+                logger.info(f"{COUNTY_NAME}: No search button found, assuming data loads automatically.")
+
+            # Wait for table
+            try:
+                table = wait.until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+            except TimeoutException:
+                logger.warning(f"{COUNTY_NAME}: No table found.")
+                return pd.DataFrame(data)
+
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]
+            for row in rows:
+                cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
+                if len(cols) >= 3:
+                    details = ' | '.join(cols[3:]) if len(cols) > 3 else ''
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[2] if cols[2] else 'Unknown',
+                        'County': COUNTY_NAME,
+                        'Source': SOURCE_NAME,
+                        'Type': RECORD_TYPE,
+                        'Details': f"DOB: {cols[1]} | {details}"
+                    })
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
+
+def scrape_brevard():
+    """
+    NEW: Scrapes the Brevard County registry.
+    Assumes a form-based search; submits empty name to retrieve all records.
+    """
+    data = []
+    COUNTY_NAME = "Brevard"
+    SOURCE_NAME = "Brevard Registry"
+    RECORD_TYPE = "Convicted"
+    url = "https://www.brevardfl.gov/AnimalAbuseDatabaseSearch"
+
+    try:
+        with SeleniumDriver() as driver:
+            driver.get(url)
+            wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+
+            # Clear name input if present
+            try:
+                name_input = driver.find_element(By.NAME, "defendantName")  # Assumed name; adjust if needed
+                name_input.clear()
+            except NoSuchElementException:
+                logger.warning(f"{COUNTY_NAME}: No name input found.")
+
+            # Click search button
+            try:
+                query_btn_xpath = "//input[@type='submit'] | //button[contains(text(),'Search')]"
+                query_button = wait.until(
+                    EC.element_to_be_clickable((By.XPATH, query_btn_xpath))
+                )
+                driver.execute_script("arguments[0].scrollIntoView();", query_button)
+                query_button.click()
+            except Exception:
+                logger.info(f"{COUNTY_NAME}: No search button, assuming auto-load.")
+
+            # Wait for results
+            try:
+                wait.until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
+            except TimeoutException:
+                logger.warning(f"{COUNTY_NAME}: No results table found.")
+                return pd.DataFrame(data)
+
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")[1:]
+            for row in rows:
+                cols = [c.text.strip() for c in row.find_elements(By.TAG_NAME, "td")]
+                if len(cols) >= 3:
+                    details = ' | '.join(cols[3:]) if len(cols) > 3 else ''
+                    data.append({
+                        'Name': cols[0],
+                        'Date': cols[2] if cols[2] else 'Unknown',
+                        'County': COUNTY_NAME,
+                        'Source': SOURCE_NAME,
+                        'Type': RECORD_TYPE,
+                        'Details': f"Case: {cols[1]} | {details}"
+                    })
+    except Exception as e:
+        alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
+
+    return pd.DataFrame(data)
 
 # --- NEW SCRAPER TEMPLATE ---
 def scrape_new_county_template():
@@ -1184,72 +1275,71 @@ def scrape_new_county_template():
         #
         # # Adjust this selector to find the rows
         # for row in soup.find_all('tr')[1:]:
-        #     cols = [c.get_text(strip=True) for c in row.find_all('td')]
-        #     if len(cols) >= 3:
-        #         data.append({
-        #             'Name': cols[0],
-        #             'Date': cols[2], # e.g., Date of conviction
-        #             'County': COUNTY_NAME,
-        #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE,
-        #             'Details': f"Case: {cols[1]}" # Add other info
-        #         })
+        # cols = [c.get_text(strip=True) for c in row.find_all('td')]
+        # if len(cols) >= 3:
+        # data.append({
+        # 'Name': cols[0],
+        # 'Date': cols[2], # e.g., Date of conviction
+        # 'County': COUNTY_NAME,
+        # 'Source': SOURCE_NAME,
+        # 'Type': RECORD_TYPE,
+        # 'Details': f"Case: {cols[1]}" # Add other info
+        # })
 
         # --- METHOD 2: Dynamic JavaScript Page (use Selenium) ---
         # url = "https://www.newcounty.gov/search-app"
         # with SeleniumDriver() as driver:
-        #     driver.get(url)
-        #     wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
+        # driver.get(url)
+        # wait = WebDriverWait(driver, SELENIUM_TIMEOUT)
         #
-        #     # Wait for the table/rows to exist
-        #     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))) # noqa: E501
+        # # Wait for the table/rows to exist
+        # wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
         #
-        #     # Add logic for clicking 'Search' or 'Next Page' if needed
+        # # Add logic for clicking 'Search' or 'Next Page' if needed
         #
-        #     for row in driver.find_elements(By.CSS_SELECTOR, "table tbody tr"):
-        #         cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
-        #         if len(cols) >= 3:
-        #             data.append({
-        #                 'Name': cols[0],
-        #                 'Date': cols[2],
-        #                 'County': COUNTY_NAME,
-        #                 'Source': SOURCE_NAME,
-        #                 'Type': RECORD_TYPE,
-        #                 'Details': f"DOB: {cols[1]}"
-        #             })
+        # for row in driver.find_elements(By.CSS_SELECTOR, "table tbody tr"):
+        # cols = [c.text for c in row.find_elements(By.TAG_NAME, "td")]
+        # if len(cols) >= 3:
+        # data.append({
+        # 'Name': cols[0],
+        # 'Date': cols[2],
+        # 'County': COUNTY_NAME,
+        # 'Source': SOURCE_NAME,
+        # 'Type': RECORD_TYPE,
+        # 'Details': f"DOB: {cols[1]}"
+        # })
 
         # --- METHOD 3: PDF Document (use pdfplumber) ---
         # pdf_url = "https://www.newcounty.gov/registry.pdf"
         # lines = extract_text_from_pdf(pdf_url)
         #
         # for line in lines:
-        #     # Add custom regex logic to parse lines
-        #     # This example looks for a line with a name and a case number
-        #     match = re.search(r'^(.*?)\s+(\d{4}-\w{2}-\d+)', line)
-        #     if match:
-        #         name = match.group(1).strip()
-        #         case_num = match.group(2).strip()
-        #         data.append({
-        #             'Name': name,
-        #             'Date': 'Unknown',
-        #             'County': COUNTY_NAME,
-        #             'Source': SOURCE_NAME,
-        #             'Type': RECORD_TYPE,
-        #             'Details': f"Case: {case_num} | Full Line: {line}"
-        #         })
-        pass # Remove this 'pass' when you uncomment a method
+        # # Add custom regex logic to parse lines
+        # # This example looks for a line with a name and a case number
+        # match = re.search(r'^(.*?)\s+(\d{4}-\w{2}-\d+)', line)
+        # if match:
+        # name = match.group(1).strip()
+        # case_num = match.group(2).strip()
+        # data.append({
+        # 'Name': name,
+        # 'Date': 'Unknown',
+        # 'County': COUNTY_NAME,
+        # 'Source': SOURCE_NAME,
+        # 'Type': RECORD_TYPE,
+        # 'Details': f"Case: {case_num} | Full Line: {line}"
+        # })
+        pass  # Remove this 'pass' when you uncomment a method
 
     except Exception as e:
         alert_failure(f"{COUNTY_NAME} scraper failed: {str(e)[:200]}")
 
     return pd.DataFrame(data)
 
-
 # --- ORCHESTRATOR ---
 
 def main():
     start_ts = time.time()
-    logger.info("Starting DNAFL Scraper Job v3.8...")
+    logger.info("Starting DNAFL Scraper Job v3.9...")
     gc = get_gspread_client()
     if not gc and not DRY_RUN:
         logger.critical("Credentials missing. Aborting.")
@@ -1257,13 +1347,9 @@ def main():
 
     tasks = [
         scrape_lee, scrape_marion, scrape_hillsborough, scrape_volusia,
-        scrape_seminole, 
-        scrape_pasco, scrape_collier, scrape_osceola,
-        scrape_broward,
-        scrape_leon,
-        scrape_polk,
-        scrape_orange, # <-- NEW
-        scrape_palmbeach, # <-- NEW
+        scrape_seminole, scrape_pasco, scrape_collier, scrape_osceola,
+        scrape_broward, scrape_leon, scrape_polk, scrape_orange,
+        scrape_palmbeach, scrape_miamidade, scrape_brevard,
         # --- To add your new scraper, uncomment the line below ---
         # scrape_new_county_template,
     ]
@@ -1313,7 +1399,6 @@ def main():
             sys.exit(1)
 
     logger.info(f"Job finished in {time.time() - start_ts:.1f}s")
-
 
 if __name__ == '__main__':
     main()
